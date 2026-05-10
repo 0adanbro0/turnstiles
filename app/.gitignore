@@ -1,0 +1,34 @@
+# --- ПЕРЕМЕННЫЕ ОКРУЖЕНИЯ (Безопасность) ---
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# --- TYPESCRIPT ---
+*.tsbuildinfo
+
+# --- JAVA (JAR и сборка) ---
+*.jar
+*.war
+*.ear
+/target/
+/build/
+.gradle/
+.scripts/
+
+# --- IDE (VS Code & WebStorm) ---
+.vscode/*
+!.vscode/extensions.json
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# --- СИСТЕМНЫЕ ФАЙЛЫ ---
+.DS_Store
+Thumbs.db
+
+node_modules

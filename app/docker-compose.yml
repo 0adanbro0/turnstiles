@@ -1,0 +1,33 @@
+version: '3.8'
+services:
+  db:
+    image: mongo:latest
+    container_name: mongodb_ids
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: admin
+      MONGO_INITDB_ROOT_PASSWORD: password123
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db # данные сохраняются здесь
+
+  backend:
+    build: ./backend
+    container_name: esp32_backend
+    depends_on:
+      - db
+    environment:
+      # Подключение к бд
+      MONGO_URI: mongodb://admin:password123@db:27017/access_db?authSource=admin
+    ports:
+      - "3000:3000" # ESP32 отправляет данные сюда
+
+  frontend:
+    build: ./frontend
+    container_name: react_web_app
+    ports:
+      - "80:80" # фронтенд
+    environment:
+      VITE_API_URL: http://:3000 # you need ipv4 adress of your pc
+volumes:
+  mongo_data:
