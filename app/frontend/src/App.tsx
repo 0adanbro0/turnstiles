@@ -1,69 +1,17 @@
 import { useEffect, useState, useCallback, ChangeEvent} from 'react';
 import './app.css'
 import { BrowserRouter, Routes, Route, Link } from 'react-router-dom';
+import { EntryLogs, AddNewUser } from './interfaces';
 
-// описывание перемнных из бд
-interface AccessLog {
-  _id: string;
-  user_id: string
-  timestamp: string;
-}
-
-interface FirstPageProps {
-  logs: AccessLog[];
-  valueInput: string | undefined;
-  handleChange: (event: ChangeEvent<HTMLInputElement>) => void;
-  addUser: () => void;
-  deleteUser: (id:string) => void;
-}
-
-const FirstPage = ({ logs, valueInput, addUsersInput, addUser, deleteUser}: FirstPageProps) => 
-  <div className="firstPage">
-
-    <div className='actionsUsers'>
-      <button onClick={addUser}>Добавить пользователя</button>
-      <input type="text"
-        value={valueInput}
-          onChange={addUsersInput}
-        />
-    </div>
-    <div className='infoUsers'>
-      <h2>ID Пользователя</h2>
-      <h2>Действие</h2>
-    </div>
-    <div className='boxUsers'>
-      <div className='displayUsers'>
-        {logs.length === 0 ? <p>База данных пуста</p> 
-          : logs.map((log) => (
-            <div className='cardUser' key={log._id}>
-              <h2><b style={{ color: '#007bff' }}>{log.user_id}</b></h2>
-              <button onClick={() => deleteUser(log._id)}>
-                удалить пользователя
-              </button>
-            </div>
-          ))
-        }
-      </div>
-    </div>
-  </div>;
-  const SecondPage = ({ logs, valueInput, searchUSers, deleteUser}: FirstPageProps) => 
-  <div className="SecondPage">
-    {logs.length === 0 ? <p>База данных пуста</p> 
-      : logs.map((log) => (
-        <div className='cardUser' key={log._id}>
-          <h2>{new Date(log.timestamp).toLocaleString()}</h2>
-          <h2><b style={{ color: '#007bff' }}>{log.user_id}</b></h2>
-          <button onClick={() => deleteUser(log._id)}>
-            удалить пользователя
-          </button>
-        </div>
-      ))
-    }
-  </div>;
+import FirstPage from './firstPage';
+import SecondPage from './secondPage';
 
 function App() {
-  const [logs, setLogs] = useState<AccessLog[]>([]);
-  const [valueInput, setValueInput] = useState<string>()
+  const [logs, setLogs] = useState<AddNewUser[]>([]);
+  const [valueInputAdd, setValueInputAdd] = useState<string>()
+  const [valueInputSearch, setValueInputSearch] = useState<string>()
+  const [freshUsers, setFreshUsers] = useState<EntryLogs[]>([])
+
   const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
 
   const deleteUser = (id: string) => {
@@ -77,7 +25,7 @@ function App() {
       }
     })
     .catch(err => console.error("Ошибка при удалении:", err));
-};
+  };
 
   const getLogs = useCallback(() => {
     fetch(`${API_URL}/api/data`)
@@ -87,11 +35,15 @@ function App() {
   }, [API_URL]);
 
   const addUsersInput = (event:  ChangeEvent<HTMLInputElement>) => {
-    setValueInput(event.target.value);
+    setValueInputAdd(event.target.value);
+  };
+
+  const searchUsers = (event:  ChangeEvent<HTMLInputElement>) => {
+    setValueInputSearch(event.target.value);
   };
 
   const addUser = () => {
-    const sendId = valueInput
+    const sendId = valueInputAdd
     
     fetch(`${API_URL}/api/data`, {
       method: 'POST',
@@ -132,12 +84,19 @@ function App() {
       <Routes>
         <Route path="/db" element={<FirstPage 
         logs={logs} 
-        valueInput={valueInput} 
-        handleChange={addUsersInput} 
+        valueInput={valueInputAdd} 
+        addUsersInput={addUsersInput} 
         addUser={addUser} 
         deleteUser={deleteUser}
         />} />
-        <Route path="/controlling" element={<SecondPage />} />
+        <Route path="/controlling" element={<SecondPage
+          logs={logs}
+          valueInputSearch={valueInputSearch}
+          searchUsers={searchUsers}
+          deleteUser={deleteUser}
+          freshUsers={freshUsers}
+          timestamp=''
+        />} />
       </Routes>
     </BrowserRouter>
   );
