@@ -7,61 +7,85 @@ import FirstPage from './firstPage';
 import SecondPage from './secondPage';
 
 function App() {
-  const [logs, setLogs] = useState<AddNewUser[]>([]);
-  const [valueInputAdd, setValueInputAdd] = useState<string>()
-  const [valueInputSearch, setValueInputSearch] = useState<string>()
-  const [freshUsers, setFreshUsers] = useState<EntryLogs[]>([])
+const [users, setUsers] = useState<AddNewUser[]>([]);
+const [valueInputAdd, setValueInputAdd] = useState<string>(''); 
+const [valueInputSearch, setValueInputSearch] = useState<string>(''); 
+const [logs, setLogs] = useState<EntryLogs[]>([]);
 
-  const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
+const API_URL = import.meta.env.VITE_API_URL;
 
-  const deleteUser = (id: string) => {
-    fetch(`${API_URL}/api/data/${id}`, {
-      method: 'DELETE',
-    })
-    .then((res) => {
-      if (res.ok) {
-        // Обновляем локальный стейт, чтобы убрать удаленного пользователя
-        setLogs(prevLogs => prevLogs.filter(log => log._id !== id));
-      }
-    })
-    .catch(err => console.error("Ошибка при удалении:", err));
-  };
+  // 1. Получение списка ПОЛЬЗОВАТЕЛЕЙ (кто имеет доступ)
+  const getUsers = useCallback(() => {
+    fetch(`${API_URL}/api/users`)
+      .then(res => res.json())
+      .then(json => setUsers(json))
+      .catch(err => console.error("Ошибка загрузки пользователей:", err));
+  }, [API_URL]);
 
+  // Получение логов доступа
   const getLogs = useCallback(() => {
     fetch(`${API_URL}/api/data`)
       .then(res => res.json())
       .then(json => setLogs(json))
-      .catch(err => console.error("Ошибка загрузки:", err));
+      .catch(err => console.error("Ошибка загрузки истории:", err));
   }, [API_URL]);
 
-  const addUsersInput = (event:  ChangeEvent<HTMLInputElement>) => {
+  // 2. Удаление ПОЛЬЗОВАТЕЛЯ из системы
+  const deleteUser = (id: string) => {
+    fetch(`${API_URL}/api/users/${id}`, {
+      method: 'DELETE',
+    })
+    .then((res) => {
+      if (res.ok) {
+        setUsers(prevUsers => prevUsers.filter(user => user._id !== id));
+      }
+    })
+    .catch(err => console.error("Ошибка при удалении пользователя:", err));
+  };
+
+  const addUsersInput = (event: ChangeEvent<HTMLInputElement>) => {
     setValueInputAdd(event.target.value);
   };
 
-  const searchUsers = (event:  ChangeEvent<HTMLInputElement>) => {
+  const searchUsers = (event: ChangeEvent<HTMLInputElement>) => {
     setValueInputSearch(event.target.value);
   };
 
+  // Добавление пользователя
   const addUser = () => {
-    const sendId = valueInputAdd
-    
-    fetch(`${API_URL}/api/data`, {
+    const idToSend = valueInputAdd.trim(); // Удаляем случайные пробелы
+
+    if (!idToSend) return;
+
+    fetch(`${API_URL}/api/users`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ 
-        user_id: sendId, 
-        device_id: "ESP32_Turnstile_1" 
+        user_id: String(idToSend)
       })
     })
-    .then(() => getLogs())
-    .catch(err => console.error("Ошибка отправки:", err));
+    .then((res) => {
+      if (res.ok) {
+        getUsers();
+        setValueInputAdd(''); // 🌟 Успешно очищаем инпут после добавления
+      }
+    })
+    .catch(err => console.error("Ошибка:", err));
   };
 
   useEffect(() => { 
-    getLogs(); 
+    getLogs();
+    getUsers(); 
+  }, [getUsers, getLogs]);
+
+  // Поллинг: обновляем историю проходов каждые 3 секунды, 
+  useEffect(() => {
+    const interval = setInterval(() => {
+      getLogs();
+    }, 3000);
+
+    return () => clearInterval(interval);
   }, [getLogs]);
-
-
 
   return (
     <BrowserRouter>
@@ -83,18 +107,17 @@ function App() {
 
       <Routes>
         <Route path="/db" element={<FirstPage 
-        logs={logs} 
-        valueInput={valueInputAdd} 
-        addUsersInput={addUsersInput} 
-        addUser={addUser} 
-        deleteUser={deleteUser}
+          users={users} 
+          valueInput={valueInputAdd} 
+          addUsersInput={addUsersInput} 
+          addUser={addUser} 
+          deleteUser={deleteUser}
         />} />
         <Route path="/controlling" element={<SecondPage
-          logs={logs}
+          users={users}
           valueInputSearch={valueInputSearch}
           searchUsers={searchUsers}
-          deleteUser={deleteUser}
-          freshUsers={freshUsers}
+          logs={logs}
           timestamp=''
         />} />
       </Routes>
@@ -103,6 +126,3 @@ function App() {
 }
 
 export default App;
-
-/*
-*/

@@ -17,7 +17,6 @@ services:
     depends_on:
       - db
     environment:
-      # Подключение к бд
       MONGO_URI: mongodb://admin:password123@db:27017/access_db?authSource=admin
     ports:
       - "3000:3000" # ESP32 отправляет данные сюда
@@ -28,6 +27,6 @@ services:
     ports:
       - "80:80" # фронтенд
     environment:
-      VITE_API_URL: http://172.17.0.1:3000 # you need ipv4 adress of your pc
+      VITE_API_URL: http://10.142.165.220:3000 # you need ipv4 adress of your pc
 volumes:
   mongo_data:
