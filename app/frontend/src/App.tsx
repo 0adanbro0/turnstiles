@@ -1,10 +1,10 @@
 import { useEffect, useState, useCallback, ChangeEvent} from 'react';
-import './app.css'
-import { BrowserRouter, Routes, Route, Link } from 'react-router-dom';
-import { EntryLogs, AddNewUser } from './interfaces';
+import './App.css'
+import { BrowserRouter, Routes, Route, Link} from 'react-router-dom';
+import { EntryLogs, AddNewUser } from './Interfaces';
 
-import FirstPage from './firstPage';
-import SecondPage from './secondPage';
+import FirstPage from './Pages/firstPage';
+import SecondPage from './Pages/secondPage';
 
 function App() {
 const [users, setUsers] = useState<AddNewUser[]>([]);
@@ -14,7 +14,6 @@ const [logs, setLogs] = useState<EntryLogs[]>([]);
 
 const API_URL = import.meta.env.VITE_API_URL;
 
-  // 1. Получение списка ПОЛЬЗОВАТЕЛЕЙ (кто имеет доступ)
   const getUsers = useCallback(() => {
     fetch(`${API_URL}/api/users`)
       .then(res => res.json())
@@ -22,7 +21,6 @@ const API_URL = import.meta.env.VITE_API_URL;
       .catch(err => console.error("Ошибка загрузки пользователей:", err));
   }, [API_URL]);
 
-  // Получение логов доступа
   const getLogs = useCallback(() => {
     fetch(`${API_URL}/api/data`)
       .then(res => res.json())
@@ -30,7 +28,6 @@ const API_URL = import.meta.env.VITE_API_URL;
       .catch(err => console.error("Ошибка загрузки истории:", err));
   }, [API_URL]);
 
-  // 2. Удаление ПОЛЬЗОВАТЕЛЯ из системы
   const deleteUser = (id: string) => {
     fetch(`${API_URL}/api/users/${id}`, {
       method: 'DELETE',
@@ -38,6 +35,18 @@ const API_URL = import.meta.env.VITE_API_URL;
     .then((res) => {
       if (res.ok) {
         setUsers(prevUsers => prevUsers.filter(user => user._id !== id));
+      }
+    })
+    .catch(err => console.error("Ошибка при удалении пользователя:", err));
+  };
+
+  const endWorkDay = () => {
+    fetch(`${API_URL}/api/data-all`, {
+      method: 'DELETE',
+    })
+    .then((res) => {
+      if (res.ok) {
+        setLogs([])
       }
     })
     .catch(err => console.error("Ошибка при удалении пользователя:", err));
@@ -51,9 +60,8 @@ const API_URL = import.meta.env.VITE_API_URL;
     setValueInputSearch(event.target.value);
   };
 
-  // Добавление пользователя
   const addUser = () => {
-    const idToSend = valueInputAdd.trim(); // Удаляем случайные пробелы
+    const idToSend = valueInputAdd.trim();
 
     if (!idToSend) return;
 
@@ -67,7 +75,28 @@ const API_URL = import.meta.env.VITE_API_URL;
     .then((res) => {
       if (res.ok) {
         getUsers();
-        setValueInputAdd(''); // 🌟 Успешно очищаем инпут после добавления
+        setValueInputAdd('');
+      }
+    })
+    .catch(err => console.error("Ошибка:", err));
+  };
+
+  const addUserSearch = (id:string) => {
+    const idToSend = id;
+
+    if (!idToSend) return;
+
+    fetch(`${API_URL}/api/users`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ 
+        user_id: String(idToSend)
+      })
+    })
+    .then((res) => {
+      if (res.ok) {
+        getUsers();
+        setValueInputAdd('');
       }
     })
     .catch(err => console.error("Ошибка:", err));
@@ -78,7 +107,7 @@ const API_URL = import.meta.env.VITE_API_URL;
     getUsers(); 
   }, [getUsers, getLogs]);
 
-  // Поллинг: обновляем историю проходов каждые 3 секунды, 
+  // Polling: update data every 3 seconds
   useEffect(() => {
     const interval = setInterval(() => {
       getLogs();
@@ -118,7 +147,8 @@ const API_URL = import.meta.env.VITE_API_URL;
           valueInputSearch={valueInputSearch}
           searchUsers={searchUsers}
           logs={logs}
-          timestamp=''
+          endWorkDay={endWorkDay}
+          addUser={addUserSearch}
         />} />
       </Routes>
     </BrowserRouter>

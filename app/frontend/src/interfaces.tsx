@@ -10,14 +10,16 @@ export interface EntryLogs {
   user_id: string;
   timestamp: string;
   isEntry: boolean;
+  access:boolean;
 }
 
 export interface SecondPageProps {
   users: AddNewUser[];
   valueInputSearch: string;
   searchUsers: (event: ChangeEvent<HTMLInputElement>) => void;
-  timestamp: string;
   logs: EntryLogs[];
+  endWorkDay: ()=>void
+  addUser:(id:string)=>void
 }
 
 export interface FirstPageProps {

@@ -1,4 +1,4 @@
-import { FirstPageProps} from './interfaces';
+import { FirstPageProps} from './../Interfaces';
 
 const FirstPage = ({ users, valueInput, addUsersInput, addUser, deleteUser}: FirstPageProps) => 
   <div className="firstPage">

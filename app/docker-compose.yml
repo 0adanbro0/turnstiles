@@ -9,7 +9,7 @@ services:
     ports:
       - "27017:27017"
     volumes:
-      - mongo_data:/data/db # данные сохраняются здесь
+      - mongo_data:/data/db # data is saving here
 
   backend:
     build: ./backend
@@ -19,13 +19,13 @@ services:
     environment:
       MONGO_URI: mongodb://admin:password123@db:27017/access_db?authSource=admin
     ports:
-      - "3000:3000" # ESP32 отправляет данные сюда
+      - "3000:3000" # ESP32 push data there
 
   frontend:
     build: ./frontend
     container_name: react_web_app
     ports:
-      - "80:80" # фронтенд
+      - "80:80" # frontend port
     environment:
       VITE_API_URL: http://10.142.165.220:3000 # you need ipv4 adress of your pc
 volumes:
