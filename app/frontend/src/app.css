@@ -63,3 +63,34 @@
     align-items: center;
     text-align: center;
 }
+
+.buttonAction{
+    width: 310px;
+    height: 50px;
+    background-color: white;
+    font-size: 17px;
+    cursor: pointer;
+    border: 1px solid black;
+    border-radius: 5px;
+    transition: 0.5s;
+}
+
+.buttonAction:hover{
+    letter-spacing: 2.5px;
+    transform: 0.5s;
+    background-color: rgb(246, 246, 246);
+}
+
+.boxLogs{
+    background-color: rgb(246, 246, 246);
+    min-height: 700px;
+    width: 100%;
+    margin-top: 10px;
+}
+
+.displayLogs{
+    width: 100%;
+    min-height: 700px;
+    display: flex;
+    justify-content: space-around;
+}

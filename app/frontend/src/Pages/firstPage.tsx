@@ -1,10 +1,11 @@
 import { FirstPageProps} from './../Interfaces';
+import Button from '../UI/buttonProps';
 
 const FirstPage = ({ users, valueInput, addUsersInput, addUser, deleteUser}: FirstPageProps) => 
   <div className="firstPage">
 
     <div className='actionsUsers'>
-      <button onClick={()=>addUser()}>Добавить пользователя</button>
+      <Button onclick={()=>addUser()} className='buttonAction' content="добавить пользователя"/>
       <input type="text"
         value={valueInput}
         onChange={addUsersInput}

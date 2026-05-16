@@ -1,18 +1,20 @@
-import { useEffect, useState, useCallback, ChangeEvent} from 'react';
+import { useEffect, useState, useMemo, useCallback, ChangeEvent} from 'react';
 import './App.css'
 import { BrowserRouter, Routes, Route, Link} from 'react-router-dom';
-import { EntryLogs, AddNewUser } from './Interfaces';
+import { EntryLogs, AddNewUser} from './Interfaces';
 
 import FirstPage from './Pages/firstPage';
 import SecondPage from './Pages/secondPage';
+import ThirdPage from './Pages/thirdPage'
 
 function App() {
-const [users, setUsers] = useState<AddNewUser[]>([]);
-const [valueInputAdd, setValueInputAdd] = useState<string>(''); 
-const [valueInputSearch, setValueInputSearch] = useState<string>(''); 
-const [logs, setLogs] = useState<EntryLogs[]>([]);
+  const [users, setUsers] = useState<AddNewUser[]>([]);
+  const [valueInputAdd, setValueInputAdd] = useState<string>(''); 
+  const [valueInputSearch, setValueInputSearch] = useState<string>(''); 
+  const [logs, setLogs] = useState<EntryLogs[]>([]);
 
-const API_URL = import.meta.env.VITE_API_URL;
+
+  const API_URL = import.meta.env.VITE_API_URL;
 
   const getUsers = useCallback(() => {
     fetch(`${API_URL}/api/users`)
@@ -104,7 +106,7 @@ const API_URL = import.meta.env.VITE_API_URL;
 
   useEffect(() => { 
     getLogs();
-    getUsers(); 
+    getUsers();
   }, [getUsers, getLogs]);
 
   // Polling: update data every 3 seconds
@@ -115,6 +117,18 @@ const API_URL = import.meta.env.VITE_API_URL;
 
     return () => clearInterval(interval);
   }, [getLogs]);
+
+  const { counterIn, counterOut } = useMemo(() => {
+    let countIn: number = 0;
+    let countOut: number = 0;
+
+    logs.forEach((elem) => {
+      if (elem.isEntry) countIn += 1;
+      else countOut += 1;
+    });
+
+    return { counterIn: countIn, counterOut: countOut };
+  }, [logs]);
 
   return (
     <BrowserRouter>
@@ -128,6 +142,7 @@ const API_URL = import.meta.env.VITE_API_URL;
           <div className="navBox">
             <Link className='navButton' to="/db">База данных</Link>
             <Link className='navButton' to="/controlling">Отслеживание пользователей</Link>
+            <Link className='navButton' to="/counter">Отслеживание входа-выхода</Link>
           </div>
         </div>
       </nav>
@@ -150,6 +165,10 @@ const API_URL = import.meta.env.VITE_API_URL;
           endWorkDay={endWorkDay}
           addUser={addUserSearch}
         />} />
+        <Route path="/counter" element={<ThirdPage
+          counterIn={counterIn}
+          counterOut={counterOut}
+        />}/>
       </Routes>
     </BrowserRouter>
   );

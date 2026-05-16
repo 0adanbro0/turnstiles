@@ -13,6 +13,11 @@ export interface EntryLogs {
   access:boolean;
 }
 
+export interface ThirdPageProps {
+  counterIn:number;
+  counterOut:number;
+}
+
 export interface SecondPageProps {
   users: AddNewUser[];
   valueInputSearch: string;
