@@ -19,12 +19,13 @@ const FirstPage = ({ users, valueInput, addUsersInput, addUser, deleteUser}: Fir
       <div className='displayUsers'>
         <div>
           {users.length === 0 ? <p>База данных пуста</p> 
-            : users.map((log) => (
-              <div className='cardUser' key={log._id}>
-                <h2><b style={{ color: '#007bff' }}>{log.user_id}</b></h2>
-                <button onClick={() => deleteUser(log._id)}>
+            : users.map((user) => (
+              <div className='cardUser' key={user._id}>
+                <h2><b style={{ color: '#007bff' }}>{user.user_id}</b></h2>
+                <button onClick={() => deleteUser(user._id)}>
                   удалить пользователя
                 </button>
+                <h2>{user.totalWorkHours ? user.totalWorkHours : 0} секунд</h2>
               </div>
             ))
           }

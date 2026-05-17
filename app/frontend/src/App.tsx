@@ -109,6 +109,13 @@ function App() {
     getUsers();
   }, [getUsers, getLogs]);
 
+  const totalWorkHours = useCallback(() => {
+    fetch(`${API_URL}/api/users/work-time`)
+      .then(res => res.json())
+      .then(json => setUsers(json))
+      .catch(err => console.error("Ошибка обновления занятости", err));
+  }, [API_URL]);
+
   // Polling: update data every 3 seconds
   useEffect(() => {
     const interval = setInterval(() => {
@@ -117,6 +124,14 @@ function App() {
 
     return () => clearInterval(interval);
   }, [getLogs]);
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      totalWorkHours();
+    }, 60000);
+
+    return () => clearInterval(interval);
+  }, [totalWorkHours]);
 
   const { counterIn, counterOut } = useMemo(() => {
     let countIn: number = 0;

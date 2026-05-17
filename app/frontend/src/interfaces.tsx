@@ -3,6 +3,7 @@ import { ChangeEvent } from "react";
 export interface AddNewUser {
   _id: string;
   user_id: string;
+  totalWorkHours: number;
 }
 
 export interface EntryLogs {
