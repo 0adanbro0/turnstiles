@@ -11,14 +11,14 @@ const SecondPage = ({endWorkDay, logs, valueInputSearch = '', searchUsers, addUs
   return (
     <div className="SecondPage">
       <div className='actionsUsers'>
+        <Button onclick={endWorkDay} className="buttonAction" content="Закончить рабочий день"/>
         <input 
-          className="inputSearch"
+          className="inputForButtonAction"
           type="text"
           placeholder="Поиск по ID карты..."
           value={valueInputSearch}
           onChange={searchUsers}
         />
-        <Button onclick={endWorkDay} className="buttonAction" content="Закончить рабочий день"/>
       </div>
       
       <div className='infoUsers'>

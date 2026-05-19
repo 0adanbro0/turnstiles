@@ -33,6 +33,8 @@ export interface SecondPageProps {
 }
 
 export interface FirstPageProps {
+  searchUsers: (event: ChangeEvent<HTMLInputElement>) => void;
+  valueInputSearchUsers:string;
   users: AddNewUser[];
   valueInput: string;
   addUsersInput: (event: ChangeEvent<HTMLInputElement>) => void;

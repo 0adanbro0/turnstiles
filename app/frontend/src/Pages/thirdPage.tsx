@@ -8,8 +8,9 @@ const ThirdPage = ({counterIn, counterOut, setLimitUsers, currentLimit, currentU
         <>
             <div className="controlPanelLimit">
                 <button className={'buttonAction'} onClick={()=>{setLimitUsers(Number(inputcontent))}}>Установить лимит</button>
-                <input type="text"
+                <input type="text" className='inputForButtonAction'
                     value={inputcontent}
+                    placeholder='Введите лимит'
                     onChange={(event: ChangeEvent<HTMLInputElement>)=>setInputContent(event.target.value)}
                 />
 

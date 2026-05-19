@@ -10,9 +10,10 @@ import ThirdPage from './Pages/thirdPage'
 function App() {
   const [users, setUsers] = useState<AddNewUser[]>([]);
   const [valueInputAdd, setValueInputAdd] = useState<string>(''); 
-  const [valueInputSearch, setValueInputSearch] = useState<string>(''); 
+  const [valueInputSearchLogs, setValueInputSearchLogs] = useState<string>(''); 
   const [logs, setLogs] = useState<EntryLogs[]>([]);
-  const [currentLimit, setCurrentLimit] = useState<number>(0)
+  const [currentLimit, setCurrentLimit] = useState<number>(0);
+  const [valueInputSearchUsers, setValueInputSearchUsers] = useState<string>(''); 
 
   const API_URL = import.meta.env.VITE_API_URL;
 
@@ -93,8 +94,12 @@ function App() {
     setValueInputAdd(event.target.value);
   };
 
+  const searchLogs = (event: ChangeEvent<HTMLInputElement>) => {
+    setValueInputSearchLogs(event.target.value);
+  };
+
   const searchUsers = (event: ChangeEvent<HTMLInputElement>) => {
-    setValueInputSearch(event.target.value);
+    setValueInputSearchUsers(event.target.value);
   };
 
   const addUser = () => {
@@ -152,24 +157,20 @@ function App() {
   }, [API_URL]);
 
   // Polling: update data every 3 seconds
-  // Замените ваши интервалы в App.tsx на этот ОДИН блок:
   useEffect(() => {
-    // Запускаем опрос логов каждые 3 секунды
     const logsInterval = setInterval(() => {
       getLogs();
     }, 3000);
 
-    // Запускаем обновление рабочего времени раз в минуту
     const hoursInterval = setInterval(() => {
       totalWorkHours();
     }, 60000);
 
-    // Очищаем оба таймера только при размонтировании приложения
     return () => {
       clearInterval(logsInterval);
       clearInterval(hoursInterval);
     };
-  }, []); // <-- ВАЖНО: пустой массив. Больше никаких перезапусков!
+  }, []);
 
 
   return (
@@ -198,11 +199,13 @@ function App() {
           addUsersInput={addUsersInput} 
           addUser={addUser} 
           deleteUser={deleteUser}
+          searchUsers={searchUsers}
+          valueInputSearchUsers={valueInputSearchUsers}
         />} />
         <Route path="/controlling" element={<SecondPage
           users={users}
-          valueInputSearch={valueInputSearch}
-          searchUsers={searchUsers}
+          valueInputSearch={valueInputSearchLogs}
+          searchUsers={searchLogs}
           logs={logs}
           endWorkDay={endWorkDay}
           addUser={addUserSearch}
