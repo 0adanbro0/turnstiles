@@ -12,9 +12,21 @@ function App() {
   const [valueInputAdd, setValueInputAdd] = useState<string>(''); 
   const [valueInputSearch, setValueInputSearch] = useState<string>(''); 
   const [logs, setLogs] = useState<EntryLogs[]>([]);
-
+  const [currentLimit, setCurrentLimit] = useState<number>(0)
 
   const API_URL = import.meta.env.VITE_API_URL;
+
+  const { counterIn, counterOut } = useMemo(() => {
+    let countIn: number = 0;
+    let countOut: number = 0;
+
+    logs.forEach((elem) => {
+      if (elem.isEntry && elem.access) countIn += 1;
+      else if(!elem.isEntry && elem.access) countOut += 1;
+    });
+
+    return { counterIn: countIn, counterOut: countOut };
+  }, [logs]);
 
   const getUsers = useCallback(() => {
     fetch(`${API_URL}/api/users`)
@@ -53,6 +65,29 @@ function App() {
     })
     .catch(err => console.error("Ошибка при удалении пользователя:", err));
   };
+
+  // Автоматическое обновление лимита и счетчика на бэкенде при изменении количества людей
+  // Срабатывает строго при изменении количества логов (новый вход/выход)
+  useEffect(() => {
+    // Если логов нет, ничего не делаем
+    if (logs.length === 0) return;
+
+    fetch(`${API_URL}/api/set-users-limit`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      // ВАЖНО: отправляем ТОЛЬКО лимит. Счетчик бэкенд обновил сам!
+      body: JSON.stringify({ 
+        limitUsers: currentLimit 
+      })
+    })
+    .catch(err => console.error("Ошибка синхронизации лимита:", err));
+  }, [logs.length, currentLimit, API_URL]); // Следим за ДЛИНОЙ массива логов
+
+  const setLimitUsers = (param:number)=>{
+    setCurrentLimit(param);
+  }
 
   const addUsersInput = (event: ChangeEvent<HTMLInputElement>) => {
     setValueInputAdd(event.target.value);
@@ -117,33 +152,25 @@ function App() {
   }, [API_URL]);
 
   // Polling: update data every 3 seconds
+  // Замените ваши интервалы в App.tsx на этот ОДИН блок:
   useEffect(() => {
-    const interval = setInterval(() => {
+    // Запускаем опрос логов каждые 3 секунды
+    const logsInterval = setInterval(() => {
       getLogs();
     }, 3000);
 
-    return () => clearInterval(interval);
-  }, [getLogs]);
-
-  useEffect(() => {
-    const interval = setInterval(() => {
+    // Запускаем обновление рабочего времени раз в минуту
+    const hoursInterval = setInterval(() => {
       totalWorkHours();
     }, 60000);
 
-    return () => clearInterval(interval);
-  }, [totalWorkHours]);
+    // Очищаем оба таймера только при размонтировании приложения
+    return () => {
+      clearInterval(logsInterval);
+      clearInterval(hoursInterval);
+    };
+  }, []); // <-- ВАЖНО: пустой массив. Больше никаких перезапусков!
 
-  const { counterIn, counterOut } = useMemo(() => {
-    let countIn: number = 0;
-    let countOut: number = 0;
-
-    logs.forEach((elem) => {
-      if (elem.isEntry) countIn += 1;
-      else countOut += 1;
-    });
-
-    return { counterIn: countIn, counterOut: countOut };
-  }, [logs]);
 
   return (
     <BrowserRouter>
@@ -183,6 +210,10 @@ function App() {
         <Route path="/counter" element={<ThirdPage
           counterIn={counterIn}
           counterOut={counterOut}
+          setLimitUsers={setLimitUsers}
+          currentLimit={currentLimit}
+          currentUsersIn={counterIn}
+          currentUsersOut={counterOut}
         />}/>
       </Routes>
     </BrowserRouter>

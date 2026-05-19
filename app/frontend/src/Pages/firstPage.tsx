@@ -3,7 +3,7 @@ import Button from '../UI/buttonProps';
 
 const FirstPage = ({ users, valueInput, addUsersInput, addUser, deleteUser}: FirstPageProps) => 
   <div className="firstPage">
-
+    
     <div className='actionsUsers'>
       <Button onclick={()=>addUser()} className='buttonAction' content="добавить пользователя"/>
       <input type="text"
