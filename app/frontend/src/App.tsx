@@ -14,6 +14,7 @@ function App() {
   const [logs, setLogs] = useState<EntryLogs[]>([]);
   const [currentLimit, setCurrentLimit] = useState<number>(0);
   const [valueInputSearchUsers, setValueInputSearchUsers] = useState<string>(''); 
+  const [isEmergency, setIsEmergency] = useState<boolean>(false)
 
   const API_URL = import.meta.env.VITE_API_URL;
 
@@ -67,10 +68,7 @@ function App() {
     .catch(err => console.error("Ошибка при удалении пользователя:", err));
   };
 
-  // Автоматическое обновление лимита и счетчика на бэкенде при изменении количества людей
-  // Срабатывает строго при изменении количества логов (новый вход/выход)
   useEffect(() => {
-    // Если логов нет, ничего не делаем
     if (logs.length === 0) return;
 
     fetch(`${API_URL}/api/set-users-limit`, {
@@ -78,29 +76,34 @@ function App() {
       headers: {
         'Content-Type': 'application/json'
       },
-      // ВАЖНО: отправляем ТОЛЬКО лимит. Счетчик бэкенд обновил сам!
       body: JSON.stringify({ 
         limitUsers: currentLimit 
       })
     })
     .catch(err => console.error("Ошибка синхронизации лимита:", err));
-  }, [logs.length, currentLimit, API_URL]); // Следим за ДЛИНОЙ массива логов
+  }, [logs.length, currentLimit, API_URL]);
 
-  const setLimitUsers = (param:number)=>{
-    setCurrentLimit(param);
-  }
+  useEffect(()=>{
+    fetch(`${API_URL}/api/emergency-situation`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+    body: JSON.stringify({ 
+        isEmergency:  isEmergency
+      })
+    })
+  }, [API_URL, isEmergency])
 
-  const addUsersInput = (event: ChangeEvent<HTMLInputElement>) => {
-    setValueInputAdd(event.target.value);
-  };
+  const setLimitUsers = (param:number) => setCurrentLimit(param);
 
-  const searchLogs = (event: ChangeEvent<HTMLInputElement>) => {
-    setValueInputSearchLogs(event.target.value);
-  };
+  const setIsEmergencyFunc = (arg:boolean) => setIsEmergency(arg);
 
-  const searchUsers = (event: ChangeEvent<HTMLInputElement>) => {
-    setValueInputSearchUsers(event.target.value);
-  };
+  const addUsersInput = (event: ChangeEvent<HTMLInputElement>) => setValueInputAdd(event.target.value);
+
+  const searchLogs = (event: ChangeEvent<HTMLInputElement>) => setValueInputSearchLogs(event.target.value);
+
+  const searchUsers = (event: ChangeEvent<HTMLInputElement>) => setValueInputSearchUsers(event.target.value);
 
   const addUser = () => {
     const idToSend = valueInputAdd.trim();
@@ -217,6 +220,9 @@ function App() {
           currentLimit={currentLimit}
           currentUsersIn={counterIn}
           currentUsersOut={counterOut}
+
+          setIsEmergencyFunc={setIsEmergencyFunc}
+          isEmergency={isEmergency}
         />}/>
       </Routes>
     </BrowserRouter>

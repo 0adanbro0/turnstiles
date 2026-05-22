@@ -31,19 +31,16 @@ const FirstPage = ({ users, valueInput, addUsersInput, addUser, deleteUser, sear
         <div className='infoUsers'>
           <h2>ID Пользователя</h2>
           <h2>Действие</h2>
+          <h2>Отработка</h2>
         </div>
         <div className='boxUsers'>
           <div className='displayUsers'>
-            <div>
-
-
-              {filteredUsers.length === 0 ? <p>База данных пуста</p> 
+            <div className='columnBlock'>
+              {filteredUsers.length === 0 ? <p className='notFound'>База данных пуста</p> 
                 : filteredUsers.map((user) => (
                   <div className='cardUser' key={user._id}>
                     <h2><b style={{ color: '#007bff' }}>{user.user_id}</b></h2>
-                    <button onClick={() => deleteUser(user._id)}>
-                      удалить пользователя
-                    </button>
+                    <Button className={'buttonAction'} onclick={() => deleteUser(user._id)} content={'удалить пользователя'}/>
                     <h2>{user.totalWorkHours ? user.totalWorkHours : 0} секунд</h2>
                   </div>
                 ))

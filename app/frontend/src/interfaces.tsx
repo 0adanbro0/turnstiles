@@ -17,10 +17,13 @@ export interface EntryLogs {
 export interface ThirdPageProps {
   counterIn:number;
   counterOut:number;
-  setLimitUsers: (arg1:number)=>void;
+  setLimitUsers: (arg:number)=>void;
   currentLimit: number;
   currentUsersIn:number;
   currentUsersOut:number;
+  
+  setIsEmergencyFunc:(arg:boolean)=>void;
+  isEmergency: boolean
 }
 
 export interface SecondPageProps {

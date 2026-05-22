@@ -22,6 +22,7 @@ const mongoUri = process.env.mongo_url || 'mongodb://admin:password123@db:27017/
 let usersLimit = 250;
 let counterCurrentUsersNow = 0; // Current number of people inside the building
 let isLimitWorking = false
+let isEmergencyBool = false;
 
 mongoose.connect(mongoUri)
   .then(() => {
@@ -144,6 +145,19 @@ app.post('/api/check', async (req, res) => {
   }
 });
 
+app.get('/api/hardware-status', (req, res) => {
+  try {
+    // Если ЧС активна — отправляем "1", иначе "0"
+    if (isEmergencyBool) {
+      return res.send("1");
+    } else {
+      return res.send("0");
+    }
+  } catch (err) {
+    return res.status(500).send("0");
+  }
+});
+
 app.get('/api/users', async (req, res) => {
   try {
     const users = await User.find().sort({ created_at: -1 });
@@ -192,7 +206,22 @@ app.post('/api/set-users-limit', async (req, res) => {
   }
 });
 
+app.post('/api/emergency-situation', async (req, res) => {
+  try {
+    const isEmergency = req.body.isEmergency;
 
+    if (typeof isEmergency !== 'boolean') {
+      return res.status(400).json({ error: 'Data format error' });
+    }
+    
+    isEmergencyBool = isEmergency;
+    res.status(200).json({ 
+      isEmergency: isEmergency
+    });
+  } catch (err) {
+    res.status(500).json({ error: 'set users limit error' });
+  }
+});
 
 app.delete('/api/users/:id', async (req, res) => {
   try {

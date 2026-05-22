@@ -23,8 +23,12 @@
 
 .cardUser{
     width: 100%;
+    height: 80px;
+    border-radius: 10px;
+    border: 1px solid black;
     display: flex;
     justify-content: space-around;
+    align-items: center;
 }
 
 .titleBox{
@@ -83,14 +87,12 @@
 
 .boxLogs{
     background-color: rgb(246, 246, 246);
-    min-height: 700px;
+    min-height: 500px;
     width: 100%;
     margin-top: 10px;
 }
 
 .displayLogs{
-    width: 100%;
-    min-height: 700px;
     display: flex;
     justify-content: space-around;
 }
@@ -103,4 +105,17 @@
     margin-left: 10px;
     font-size: 17px;
     text-align: center;
+}
+
+.notFound{
+    text-align: center;
+    margin-top: 20px;
+    color: #888
+}
+
+.columnBlock{
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    width: 100%;
 }
