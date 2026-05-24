@@ -10,7 +10,7 @@ const SecondPage = ({endWorkDay, logs, valueInputSearch = '', searchUsers, addUs
 
   return (
     <div className="SecondPage">
-      <div className='actionsUsers'>
+      <div className='actionUsers'>
         <Button onclick={endWorkDay} className="buttonAction" content="Закончить рабочий день"/>
         <input 
           className="inputForButtonAction"
@@ -36,9 +36,9 @@ const SecondPage = ({endWorkDay, logs, valueInputSearch = '', searchUsers, addUs
               <div className='cardUser' key={log._id}>
                 <h2>{new Date(log.timestamp).toLocaleString()}</h2>
                 <h2><b style={{ color: '#007bff' }}>{log.user_id}</b></h2>
-                <h2>{log.isEntry ? '🟢Вход' : '🔴Выход'}</h2>
+                <h2>{log.isEntry ? 'Вход' : 'Выход'}</h2>
                 <Button className={'buttonAction'} content={users.some(user => user.user_id === log.user_id) ? 'пользователь добавлен' : 'добавить пользователя'} onclick={()=>addUser(log.user_id)}/>
-                <h2>{log.access == false ? 'запрещен' : 'разрешен'}</h2>
+                <h2 className={log.access == false ? 'denied' : 'success'}>{log.access == false ? 'запрещен' : 'разрешен'}</h2>
               </div>
             ))}
 

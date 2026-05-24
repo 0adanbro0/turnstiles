@@ -85,6 +85,12 @@
     background-color: rgb(246, 246, 246);
 }
 
+.controlPanelLimit{
+    display: flex;
+    flex-direction: row;
+    gap: 20px;
+}
+
 .boxLogs{
     background-color: rgb(246, 246, 246);
     min-height: 500px;
@@ -97,12 +103,25 @@
     justify-content: space-around;
 }
 
+.actionUsers{
+    display: flex;
+    flex-direction: row;
+    gap: 20px;
+}
+
+.denied{
+    color:red;
+}
+
+.success{
+    color:rgb(0, 255, 0);
+}
+
 .inputForButtonAction{
     width: 200px;
     height: 45px;
     border-radius: 10px;
     border: 1px solid black;
-    margin-left: 10px;
     font-size: 17px;
     text-align: center;
 }

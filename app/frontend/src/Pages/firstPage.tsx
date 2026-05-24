@@ -13,7 +13,7 @@ const FirstPage = ({ users, valueInput, addUsersInput, addUser, deleteUser, sear
     <>
       <div className="firstPage">
         
-        <div className='actionsUsers'>
+        <div className='actionUsers'>
           <Button onclick={()=>addUser()} className='buttonAction' content="добавить пользователя"/>
           <input type="text" className='inputForButtonAction'
             value={valueInput}
@@ -21,12 +21,12 @@ const FirstPage = ({ users, valueInput, addUsersInput, addUser, deleteUser, sear
             placeholder='Введите id'
           />
           <input 
-              className="inputForButtonAction"
-              type="text"
-              placeholder="Поиск по ID карты..."
-              value={valueInputSearchUsers}
-              onChange={searchUsers}
-            />
+            className="inputForButtonAction"
+            type="text"
+            placeholder="Поиск по ID карты..."
+            value={valueInputSearchUsers}
+            onChange={searchUsers}
+          />
         </div>
         <div className='infoUsers'>
           <h2>ID Пользователя</h2>

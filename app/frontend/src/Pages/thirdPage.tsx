@@ -6,7 +6,7 @@ const ThirdPage = ({counterIn, counterOut, setLimitUsers, isEmergency, setIsEmer
     const isEmergencyPage:boolean = isEmergency; 
     
     return(
-        <>
+        <div>
             <div className="controlPanelLimit">
                 <button className={'buttonAction'} onClick={()=>{setLimitUsers(Number(inputcontent))}}>Установить лимит</button>
                 <input type="text" className='inputForButtonAction'
@@ -14,10 +14,10 @@ const ThirdPage = ({counterIn, counterOut, setLimitUsers, isEmergency, setIsEmer
                     placeholder='Введите лимит'
                     onChange={(event: ChangeEvent<HTMLInputElement>)=>setInputContent(event.target.value)}
                 />
-                <button className={'buttonAction'} onClick={()=>setIsEmergencyFunc(!isEmergencyPage ? true : false)}>{isEmergencyPage ? "заблокировать свободный проход" : "разблокировать свободный проход"}</button>
-
-                <h2>limit:{currentUsersIn - currentUsersOut}/{currentLimit}</h2>
+                <button className={'buttonAction'} onClick={()=>setIsEmergencyFunc(!isEmergencyPage ? true : false)}>{isEmergencyPage ? "свободный проход" : "закрытый проход"}</button>
             </div>
+
+            <h2>limit:{currentUsersIn - currentUsersOut}/{currentLimit}</h2>
 
             <div className="columnCounter">
                 <h1>Вход :{counterIn}</h1>
@@ -26,7 +26,7 @@ const ThirdPage = ({counterIn, counterOut, setLimitUsers, isEmergency, setIsEmer
             <div className="columnCounter">
                 <h1>Выход :{counterOut}</h1>
             </div>
-        </>
+        </div>
     )
 }
 

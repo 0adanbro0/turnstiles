@@ -149,9 +149,9 @@ app.get('/api/hardware-status', (req, res) => {
   try {
     // Если ЧС активна — отправляем "1", иначе "0"
     if (isEmergencyBool) {
-      return res.send("1");
+      return res.send(true);
     } else {
-      return res.send("0");
+      return res.send(false);
     }
   } catch (err) {
     return res.status(500).send("0");
