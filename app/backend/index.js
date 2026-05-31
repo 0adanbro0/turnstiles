@@ -23,6 +23,10 @@ let usersLimit = 250;
 let counterCurrentUsersNow = 0; // Current number of people inside the building
 let isLimitWorking = false
 let isEmergencyBool = false;
+let isAddingCardBool = false
+
+let currentTimeCard = Date.now();
+let StatusCardModuleConnection = "false";
 
 mongoose.connect(mongoUri)
   .then(() => {
@@ -54,7 +58,7 @@ const AccessLog = mongoose.model('AccessLog', LogSchema);
 // ESP32 sends a request here when someone scans a card
 app.post('/api/check', async (req, res) => {
   try {
-    const { user_id, direction } = req.body; 
+    const { user_id, direction, isAddingCardStatus } = req.body; 
     
     if (!user_id) {
       console.log('Access denied: empty user_id received');
@@ -66,6 +70,12 @@ app.post('/api/check', async (req, res) => {
 
     // 1. Check if user exists in database
     const userExists = await User.findOne({ user_id: userIdStr });
+    if(isAddingCardStatus == "1"){
+      const newUser = new User({ user_id: userIdStr });
+      await newUser.save();
+      return;
+    }
+
     if (!userExists) {
       console.log(`Access denied [unknown card]: ${userIdStr}`);
       await new AccessLog({ user_id: userIdStr, isEntry: isEntering, access: false }).save();
@@ -145,6 +155,19 @@ app.post('/api/check', async (req, res) => {
   }
 });
 
+app.get('/api/adding-card', (req, res) => {
+  try {
+    // Если ЧС активна — отправляем "1", иначе "0"
+    if (isAddingCardBool) {
+      return res.send(true);
+    } else {
+      return res.send(false);
+    }
+  } catch (err) {
+    return res.status(500).send("0");
+  }
+});
+
 app.get('/api/hardware-status', (req, res) => {
   try {
     // Если ЧС активна — отправляем "1", иначе "0"
@@ -155,6 +178,37 @@ app.get('/api/hardware-status', (req, res) => {
     }
   } catch (err) {
     return res.status(500).send("0");
+  }
+});
+
+app.post('/api/connection-to-server', (req, res) => {
+  if (!req.body || !req.body.device_name) {
+    return res.status(400).json({ error: 'Invalid or empty data received' });
+  }
+
+  if(req.body.device_name == "ESP32_Gate_CARD_Main"){
+    StatusCardModuleConnection = req.body.connection
+
+    currentTimeCard = Date.now();
+  }
+
+  console.log(`[HTTP] Обновлен статус для card rfid connection`);
+  res.status(200).json({ 
+    success: true, 
+    message: "Status updated successfully" 
+  });
+});
+
+app.get('/api/connection-to-server', async (req, res) => {
+  try {
+    // Если с момента последнего POST-запроса прошло больше 20 секунд
+    if (!currentTimeCard || Date.now() - currentTimeCard > 20000) {
+      StatusCardModuleConnection = false; // Сбрасываем глобальный статус
+    }
+
+    res.json(StatusCardModuleConnection);
+  } catch (err) {
+    res.status(500).json({ error: 'connection lost' });
   }
 });
 
@@ -200,6 +254,23 @@ app.post('/api/set-users-limit', async (req, res) => {
       currentLimit: usersLimit, 
       currentCounterInUsers: counterCurrentUsersNow,
       isLimitWorking: isLimitWorking
+    });
+  } catch (err) {
+    res.status(500).json({ error: 'set users limit error' });
+  }
+});
+
+app.post('/api/adding-card', async (req, res) => {
+  try {
+    const isAddingCard = req.body.isAddingCard;
+
+    if (typeof isAddingCard !== 'boolean') {
+      return res.status(400).json({ error: 'Data format error' });
+    }
+    
+    isAddingCardBool = isAddingCard;
+    res.status(200).json({ 
+      isAddingCard: isAddingCard
     });
   } catch (err) {
     res.status(500).json({ error: 'set users limit error' });

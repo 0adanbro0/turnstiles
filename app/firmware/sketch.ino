@@ -2,14 +2,19 @@
 #include <MFRC522.h>
 #include <WiFi.h>
 #include <HTTPClient.h>
+#include <Ticker.h>
 
-// WiFi — ОБЯЗАТЕЛЬНО ЗАПОЛНИТЕ ПЕРЕД ПРОШИВКОЙ!
+Ticker emergencyTicker;
+Ticker addingCardTicker;
+
 const char* ssid = "s24";
 const char* password = "45504550";
+const String ipv4 = "10.25.77.220";
 
-// Ссылка на ваш Node.js бэкенд (из настроек docker-compose)
-const char* serverURL = "http://10.142.165.220:3000/api/check";
-const char* statusURL = "http://10.142.165.220:3000/api/hardware-status";
+const String serverURL = "http://"+ ipv4 +":3000/api/check";
+const String statusURL = "http://"+ ipv4 +":3000/api/hardware-status";
+const String addingCardURL = "http://"+ ipv4 +":3000/api/adding-card";
+const String wifiStatusURL = "http://"+ ipv4 +":3000/api/connection-to-server"; 
 
 // RFID 1 (ENTRANCE)
 #define SS1_PIN 5
@@ -27,15 +32,32 @@ MFRC522 rfid2(SS2_PIN, RST2_PIN);
 #define GREEN_LED 25
 #define BLUE_LED_UNKNOWN 26
 
-unsigned long timer1 = 0;
-unsigned long timer2 = 0;
+unsigned long timerRFID = 0;
+unsigned long timerSendConnection = 0;
+unsigned long timerStatus = 0;
+unsigned long timerAdding = 0;
 
 bool isEmergency = false;
+bool isAddingCard = false;
+bool lastAddingCardState = false;
 bool lastEmergencyState = false;
 bool isProcessingCard = false;
+bool blinkState = false;
 
 WiFiClient client;
 HTTPClient http;
+
+void sendWifiReadyStatus() {
+  if (WiFi.status() == WL_CONNECTED) {
+    http.begin(client, wifiStatusURL);
+    http.addHeader("Content-Type", "application/json");
+    String payload = "{\"device_name\":\"ESP32_Gate_CARD_Main\",\"connection\":\"true\"}";
+    int code = http.POST(payload);
+    Serial.print("[WiFi-Status] Данные отправлены. Код: ");
+    Serial.println(code);
+    http.end();
+  }
+}
 
 void setup() {
   Serial.begin(115200);
@@ -47,6 +69,7 @@ void setup() {
 
   digitalWrite(RED_LED, HIGH);
   digitalWrite(GREEN_LED, HIGH);
+  digitalWrite(BLUE_LED_UNKNOWN, LOW);
 
   WiFi.begin(ssid, password);
   Serial.print("Connecting to WiFi");
@@ -63,17 +86,14 @@ void setup() {
   rfid2.PCD_Init();
 }
 
-// GREEN LED, access
 void greenSuccess() {
   digitalWrite(RED_LED, LOW);
   tone(buzzerPin, 1500);
-  
   delay(1000);
   digitalWrite(RED_LED, HIGH);
   noTone(buzzerPin);
 }
 
-// RED LED, denied
 void redError() {
   Serial.print("доступ запрещен");
   tone(buzzerPin, 100);
@@ -81,7 +101,6 @@ void redError() {
   noTone(buzzerPin);
 }
 
-// BLUE LED, unknown card
 void blueError(){
   digitalWrite(BLUE_LED_UNKNOWN, HIGH);
   tone(buzzerPin, 100);
@@ -91,11 +110,9 @@ void blueError(){
   noTone(buzzerPin);
 }
 
-// BLUE LED, limit reached
 void blueErrorLimit(){
   digitalWrite(BLUE_LED_UNKNOWN, HIGH);
   tone(buzzerPin, 300);
-  Serial.print("неизвестная карта, доступ запрещен");
   delay(500);
   digitalWrite(BLUE_LED_UNKNOWN, LOW);
   noTone(buzzerPin);
@@ -107,7 +124,6 @@ void blueErrorLimit(){
   noTone(buzzerPin);
 }
 
-// send data in json format
 String sendToServer(String uid, String gate) {
   if(isEmergency){
     return "ALERT : EMERGENCY SITUATION!!!";
@@ -122,7 +138,7 @@ String sendToServer(String uid, String gate) {
   http.addHeader("Content-Type", "application/json");
 
   String direction = (gate == "ENTRANCE") ? "in" : "out";
-  String jsonPayload = "{\"user_id\":\"" + uid + "\",\"direction\":\"" + direction + "\"}";
+  String jsonPayload = "{\"user_id\":\"" + uid + "\",\"direction\":\"" + direction + "\",\"isAddingCardStatus\":\"" + isAddingCard + "\"}";
 
   int code = http.POST(jsonPayload);
   String response = "";
@@ -158,16 +174,32 @@ void checkBackendStatus() {
     response.trim();
     isEmergency = (response == "true" || response == "1");
     
-    Serial.print("[Фон] Статус: ");
+    Serial.print("[Фон] Статус Тревоги: ");
     Serial.println(isEmergency ? "TRUE" : "FALSE");
   }
   http.end();
 }
 
-// SCANING
+void checkAddingCardStatus() {
+  if (WiFi.status() != WL_CONNECTED) return;
+
+  http.begin(client, addingCardURL);
+  http.addHeader("Connection", "keep-alive");
+  int code = http.GET();
+
+  if (code == 200) {
+    String response = http.getString();
+    response.trim();
+    isAddingCard = (response == "true" || response == "1");
+    
+    Serial.print("[Фон] Статус Добавления: ");
+    Serial.println(isAddingCard ? "TRUE" : "FALSE");
+  }
+  http.end();
+}
+
 void checkReader(MFRC522 &reader, String gate) {
   if (!reader.PICC_IsNewCardPresent() || !reader.PICC_ReadCardSerial()) return;
-
 
   isProcessingCard = true;
   String uid = "";
@@ -176,73 +208,90 @@ void checkReader(MFRC522 &reader, String gate) {
     uid += (reader.uid.uidByte[i] < 0x10 ? "0" : "");
     uid += String(reader.uid.uidByte[i], HEX);
   }
-
   uid.toUpperCase();
 
   Serial.println("\nSCAN: " + uid + " (" + gate + ")");
-
   String response = sendToServer(uid, gate);
 
-  if (response == "1") {
-    greenSuccess();
-  }
-  else if (response == "404") {
-    blueError();
-  }
-  else if (response == "422") {
-    blueErrorLimit();
-  }
-  else if (response == "0") {
-    redError();
-  }
-  else {
-    Serial.println("UNKNOWN RESPONSE - NO ACTION");
-  }
+  if (response == "1") { greenSuccess(); }
+  else if (response == "404") { blueError(); }
+  else if (response == "422") { blueErrorLimit(); }
+  else if (response == "0") { redError(); }
+  else { Serial.println("UNKNOWN RESPONSE - NO ACTION"); }
 
   reader.PICC_HaltA();
-
   isProcessingCard = false;
-  timer2 = millis();
+}
+
+void toggleEmergencyLED() {
+  blinkState = !blinkState;
+  digitalWrite(GREEN_LED, HIGH);
+  digitalWrite(RED_LED, blinkState ? LOW : HIGH);
+  digitalWrite(BLUE_LED_UNKNOWN, LOW);
+  if (blinkState) tone(buzzerPin, 1500); else tone(buzzerPin, 500);
+}
+
+void toggleAddingCardLED() {
+  blinkState = !blinkState;
+  digitalWrite(GREEN_LED, HIGH);
+  digitalWrite(RED_LED, HIGH);
+  digitalWrite(BLUE_LED_UNKNOWN, blinkState ? HIGH : LOW);
+  if (blinkState) tone(buzzerPin, 1200, 100); 
 }
 
 void loop() {
-  if (isEmergency != lastEmergencyState) {
-    if (!isEmergency) {
-      digitalWrite(RED_LED, HIGH);
-      digitalWrite(GREEN_LED, HIGH);
-      digitalWrite(BLUE_LED_UNKNOWN, LOW);
-    }
-    lastEmergencyState = isEmergency;
+  if ((isEmergency != lastEmergencyState && !isEmergency) || 
+      (isAddingCard != lastAddingCardState && !isAddingCard)) {
+    digitalWrite(RED_LED, HIGH);
+    digitalWrite(GREEN_LED, HIGH);
+    digitalWrite(BLUE_LED_UNKNOWN, LOW);
+    noTone(buzzerPin);
   }
+  lastEmergencyState = isEmergency;
+  lastAddingCardState = isAddingCard;
 
   if (!isEmergency) {
-    if (millis() - timer1 >= 20) {
-      timer1 = millis();
+    if (millis() - timerRFID >= 40) {
+      timerRFID = millis();
       checkReader(rfid1, "ENTRANCE");
       checkReader(rfid2, "EXIT");
     }
-  } 
-  else {
-    digitalWrite(GREEN_LED, HIGH);
-    tone(buzzerPin, 1500);
-    delay(1000);
-    tone(buzzerPin, 500);
-    delay(300);
-    tone(buzzerPin, 2000);
-    delay(1000);
+  }
+
+  if (isEmergency) {
+    addingCardTicker.detach();
+    if (!emergencyTicker.active()) {
+      emergencyTicker.attach(0.5, toggleEmergencyLED);
+    }
+  }
+  else if (isAddingCard) {
+    emergencyTicker.detach();
+    if (!addingCardTicker.active()) {
+      addingCardTicker.attach(1, toggleAddingCardLED);
+    }
+  }else {
+    emergencyTicker.detach();
+    addingCardTicker.detach();
     noTone(buzzerPin);
-    digitalWrite(RED_LED, LOW);
+    digitalWrite(RED_LED, HIGH); 
+    digitalWrite(GREEN_LED, HIGH);
     digitalWrite(BLUE_LED_UNKNOWN, LOW);
   }
 
-  if (!isProcessingCard && (millis() - timer2 >= 2500)) {
-    timer2 = millis();
-    checkBackendStatus();
+  if (!isProcessingCard) {
+    if (millis() - timerStatus >= 2500) {
+      timerStatus = millis();
+      checkBackendStatus();
+    }
+    
+    if (millis() - timerAdding >= 3000) {
+      timerAdding = millis();
+      checkAddingCardStatus();
+    }
   }
 
-  // Задача 2: отправляет данные в порт каждые 2.5 секунды
-  if (!isProcessingCard && (millis() - timer2 >= 2500)) {
-    timer2 = millis();
-    checkBackendStatus();
+  if (millis() - timerSendConnection >= 5000) {
+    timerSendConnection = millis();
+    sendWifiReadyStatus();
   }
 }

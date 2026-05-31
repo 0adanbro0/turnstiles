@@ -1,9 +1,11 @@
 import { useState, ChangeEvent } from 'react';
 import { ThirdPageProps } from "../Interfaces"
+import Button from '../UI/buttonProps';
 
-const ThirdPage = ({counterIn, counterOut, setLimitUsers, isEmergency, setIsEmergencyFunc, currentLimit, currentUsersIn, currentUsersOut}: ThirdPageProps)=>{
+const ThirdPage = ({counterIn, counterOut, setLimitUsers, isEmergency, statusCardModule, isAddingCard, setIsAddingCardFunc, setIsEmergencyFunc, currentLimit, currentUsersIn, currentUsersOut}: ThirdPageProps)=>{
     const [inputcontent, setInputContent] = useState('')
     const isEmergencyPage:boolean = isEmergency; 
+    const isAddingCardPage:boolean = isAddingCard;
     
     return(
         <div>
@@ -14,17 +16,37 @@ const ThirdPage = ({counterIn, counterOut, setLimitUsers, isEmergency, setIsEmer
                     placeholder='Введите лимит'
                     onChange={(event: ChangeEvent<HTMLInputElement>)=>setInputContent(event.target.value)}
                 />
-                <button className={'buttonAction'} onClick={()=>setIsEmergencyFunc(!isEmergencyPage ? true : false)}>{isEmergencyPage ? "свободный проход" : "закрытый проход"}</button>
+                <Button className={'buttonAction'} onclick={()=>setIsEmergencyFunc(!isEmergencyPage ? true : false)} content={isEmergencyPage ? "свободный проход" : "закрытый проход"}/>
+                <Button className={'buttonAction'} onclick={()=>setIsAddingCardFunc(!isAddingCardPage ? true : false)} content={isAddingCardPage ? "активно" : "неактивно"}/>
             </div>
 
-            <h2>limit:{currentUsersIn - currentUsersOut}/{currentLimit}</h2>
+            <div className='boxConnection'>
+                <div>
+                    <div className='cardConnection'>
+                    <h2 className='connectionModule'>подключение модуля RFID-карт : </h2>
+                    <h2 className='connectionInfo'>{!statusCardModule? "lost" : "okey"}</h2>
+                </div>
+
+                <div className='cardConnection'>
+                    <h2 className='connectionModule'>подлкючение модуля камеры : </h2>
+                    <h2 className='connectionInfo'>{!statusCardModule? "lost" : "okey"}</h2>
+                </div>
+
+                <div className='cardConnection'>
+                    <h2 className='connectionModule'>подключение модля отпечатка пальцев : </h2>
+                    <h2 className='connectionInfo'>{!statusCardModule? "lost" : "okey"}</h2>
+                </div>
+                </div>
+            </div>
+
+            <h2>лимит : {currentUsersIn - currentUsersOut}/{currentLimit}</h2>
 
             <div className="columnCounter">
-                <h1>Вход :{counterIn}</h1>
+                <h1>Вход : {counterIn}</h1>
             </div>
             
             <div className="columnCounter">
-                <h1>Выход :{counterOut}</h1>
+                <h1>Выход : {counterOut}</h1>
             </div>
         </div>
     )

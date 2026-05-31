@@ -27,6 +27,6 @@ services:
     ports:
       - "80:80" # frontend port
     environment:
-      VITE_API_URL: http://10.142.165.220:3000 # you need ipv4 adress of your pc
+      VITE_API_URL: http://10.25.77.220:3000 # you need ipv4 adress of your pc
 volumes:
   mongo_data:

@@ -21,9 +21,14 @@ export interface ThirdPageProps {
   currentLimit: number;
   currentUsersIn:number;
   currentUsersOut:number;
+
+  statusCardModule:boolean;
   
   setIsEmergencyFunc:(arg:boolean)=>void;
-  isEmergency: boolean
+  isEmergency:boolean;
+
+  setIsAddingCardFunc:(arg:boolean)=>void;
+  isAddingCard:boolean;
 }
 
 export interface SecondPageProps {
