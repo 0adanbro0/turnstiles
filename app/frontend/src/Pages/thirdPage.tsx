@@ -2,7 +2,7 @@ import { useState, ChangeEvent } from 'react';
 import { ThirdPageProps } from "../Interfaces"
 import Button from '../UI/buttonProps';
 
-const ThirdPage = ({counterIn, counterOut, setLimitUsers, isEmergency, statusCardModule, isAddingCard, setIsAddingCardFunc, setIsEmergencyFunc, currentLimit, currentUsersIn, currentUsersOut}: ThirdPageProps)=>{
+const ThirdPage = ({counterIn, counterOut, setLimitUsers, isEmergency, statusMainLockModule, statusCardModule, isAddingCard, setIsAddingCardFunc, setIsEmergencyFunc, currentLimit, currentUsersIn, currentUsersOut}: ThirdPageProps)=>{
     const [inputcontent, setInputContent] = useState('')
     const isEmergencyPage:boolean = isEmergency; 
     const isAddingCardPage:boolean = isAddingCard;
@@ -28,8 +28,8 @@ const ThirdPage = ({counterIn, counterOut, setLimitUsers, isEmergency, statusCar
                 </div>
 
                 <div className='cardConnection'>
-                    <h2 className='connectionModule'>подлкючение модуля камеры : </h2>
-                    <h2 className='connectionInfo'>{!statusCardModule? "lost" : "okey"}</h2>
+                    <h2 className='connectionModule'>подключение модуля замка : </h2>
+                    <h2 className='connectionInfo'>{!statusMainLockModule? "lost" : "okey"}</h2>
                 </div>
 
                 <div className='cardConnection'>

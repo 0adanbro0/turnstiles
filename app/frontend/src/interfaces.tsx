@@ -14,6 +14,11 @@ export interface EntryLogs {
   access:boolean;
 }
 
+export interface ConnectionResponse {
+  connected: boolean;
+  connectedLock: boolean;
+}
+
 export interface ThirdPageProps {
   counterIn:number;
   counterOut:number;
@@ -23,6 +28,7 @@ export interface ThirdPageProps {
   currentUsersOut:number;
 
   statusCardModule:boolean;
+  statusMainLockModule:boolean;
   
   setIsEmergencyFunc:(arg:boolean)=>void;
   isEmergency:boolean;

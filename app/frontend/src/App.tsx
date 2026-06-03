@@ -1,7 +1,7 @@
 import { useEffect, useState, useMemo, useCallback, ChangeEvent, useRef } from 'react';
 import './App.css';
 import { BrowserRouter, Routes, Route, Link } from 'react-router-dom';
-import { EntryLogs, AddNewUser } from './Interfaces';
+import { EntryLogs, AddNewUser, ConnectionResponse } from './Interfaces';
 
 import FirstPage from './Pages/firstPage';
 import SecondPage from './Pages/secondPage';
@@ -17,6 +17,7 @@ function App() {
   const [isEmergency, setIsEmergency] = useState<boolean>(false);
   const [cardModuleStatus, setCardModuleStatus] = useState<boolean>(false);
   const [isAddingCard, setIsAddingCard] = useState<boolean>(false);
+  const [statusMainLockModule, setStatusMainLockModule] = useState<boolean>(false)
 
   // Use refs to stop sending requests on the first render (component mount)
   const isFirstRenderEmergency = useRef(true);
@@ -115,14 +116,17 @@ function App() {
     fetch(`${API_URL}/api/connection-to-server`)
       .then(res => {
         if (!res.ok) throw new Error('Ошибка сервера');
-        return res.json();
+        return res.json() as Promise<ConnectionResponse>; // Приводим к нужному типу
       })
-      .then((json: unknown) => {
-        setCardModuleStatus(json === true || String(json) === "true");
+      .then((data: ConnectionResponse) => {
+        // ИСПРАВЛЕНО: Достаем флаг прямо из объекта data.connected
+        setCardModuleStatus(Boolean(data && data.connected));
+        setStatusMainLockModule(Boolean(data && data.connectedLock));
       })
       .catch((err: unknown) => {
         console.error("Ошибка запроса статуса ESP32:", err);
         setCardModuleStatus(false);
+        setStatusMainLockModule(false);
       });
   }, [API_URL]);
 
@@ -253,6 +257,7 @@ function App() {
             setIsAddingCardFunc={setIsAddingCardFunc}
             isAddingCard={isAddingCard}
             statusCardModule={cardModuleStatus}
+            statusMainLockModule={statusMainLockModule}
           />
         } />
       </Routes>
