@@ -3,8 +3,8 @@ services:
     image: mongo:latest
     container_name: mongodb_ids
     environment:
-      MONGO_INITDB_ROOT_USERNAME: admin
-      MONGO_INITDB_ROOT_PASSWORD: password123
+      MONGO_INITDB_ROOT_USERNAME: ${DB_NAME}
+      MONGO_INITDB_ROOT_PASSWORD: ${DB_PASSWORD}
     ports:
       - "27017:27017"
     volumes:
@@ -35,19 +35,20 @@ services:
       - db
       - mosquitto
     environment:
-      - mongo_url=mongodb://admin:password123@db:27017/access_db?authSource=admin
+      - mongo_url=mongodb://${DB_NAME}:${DB_PASSWORD}@db:27017/access_db?authSource=admin
       - MQTT_HOST=mqtt://mosquitto:1883
     ports:
       - "3000:3000"
     restart: always
 
   frontend:
-    build: ./frontend
+    build: 
+      context: ./frontend
+      args:
+          - VITE_API_URL=http://${IPV4}:3000
     container_name: react_web_app
     ports:
       - "80:80"
-    environment:
-      - VITE_API_URL=http://10.25.77.220:3000
     restart: always
 
 volumes:

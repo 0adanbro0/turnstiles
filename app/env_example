@@ -1,2 +1,5 @@
-IP_personal_pc = string
-But it is useless now
+PASSWORD_WIFI=number || string
+NAME_WIFI=string
+IPV4=string (like {number.number.number.number}. open cmd and start the command {ipconfig}, after search the ip of wirelles network module)
+DB_PASSWORD=string || number
+DB_NAME=string

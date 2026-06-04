@@ -1,0 +1,3 @@
+that file, sketch.ino which is located near readme is combinate both mainGateLock file and CardModule file. 
+*Use this firmware if you wanna have only one esp32 both for card reader and lock.
+**DONT use ESP 32 SUPER MINI for this sketch unless you would like to burned your esp32 mini because there will be overcurrent from readers on GPIO pins.

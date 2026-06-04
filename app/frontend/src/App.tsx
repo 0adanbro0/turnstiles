@@ -1,5 +1,5 @@
 import { useEffect, useState, useMemo, useCallback, ChangeEvent, useRef } from 'react';
-import './App.css';
+import './app.css';
 import { BrowserRouter, Routes, Route, Link } from 'react-router-dom';
 import { EntryLogs, AddNewUser, ConnectionResponse } from './Interfaces';
 

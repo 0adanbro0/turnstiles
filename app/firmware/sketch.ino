@@ -8,9 +8,9 @@
 Ticker emergencyTicker;
 Ticker addingCardTicker;
 
-const char* ssid = "s24";
-const char* password = "45504550";
-const char* mqtt_server = "10.25.77.220";
+const char* ssid = ""; // name of your network!!!
+const char* password = ""; // password of your network!!!
+const char* mqtt_server = ""; // ipv4 of your pc!!!
 const int mqtt_port = 1883; 
 
 // RFID 1 (ENTRANCE)
