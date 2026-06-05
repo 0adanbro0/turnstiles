@@ -1,0 +1,16 @@
+**You need the next components:**
+- *esp32 30pin*
+- *2x RC522 readers*
+
+---
+
+**Connection:**
+- *RFID 1 (ENTRANCE)*
+SS1_PIN  = 5
+RST1_PIN = 21
+
+- *RFID 2 (EXIT)*
+SS2_PIN = 4
+RST2_PIN = 22
+
+- **18, 19, 23, 5 - this pins just waitinig a signal** 
