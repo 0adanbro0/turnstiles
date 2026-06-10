@@ -1,5 +1,5 @@
 import { useEffect, useState, useMemo, useCallback, ChangeEvent, useRef } from 'react';
-import './app.css';
+import './App.css';
 import { BrowserRouter, Routes, Route, Link } from 'react-router-dom';
 import { EntryLogs, AddNewUser, ConnectionResponse } from './Interfaces';
 
@@ -18,6 +18,7 @@ function App() {
   const [cardModuleStatus, setCardModuleStatus] = useState<boolean>(false);
   const [isAddingCard, setIsAddingCard] = useState<boolean>(false);
   const [statusMainLockModule, setStatusMainLockModule] = useState<boolean>(false)
+  const [buttonAccessLevel, setButtonAccessLevel] = useState<string>('firstLevel')
 
   // Use refs to stop sending requests on the first render (component mount)
   const isFirstRenderEmergency = useRef(true);
@@ -135,17 +136,19 @@ function App() {
   const setLimitUsers = (param: number) => setCurrentLimit(param);
   const setIsEmergencyFunc = (arg: boolean) => setIsEmergency(arg);
   const addUsersInput = (event: ChangeEvent<HTMLInputElement>) => setValueInputAdd(event.target.value);
+  const addInfoAccessLevel = (param: string) => setButtonAccessLevel(param)
   const searchLogs = (event: ChangeEvent<HTMLInputElement>) => setValueInputSearchLogs(event.target.value);
   const searchUsers = (event: ChangeEvent<HTMLInputElement>) => setValueInputSearchUsers(event.target.value);
 
   const addUser = () => {
-    const idToSend = valueInputAdd.trim();
-    if (!idToSend) return;
+    const idToSend:string = valueInputAdd.trim();
+    const accessLevelToSend:string = buttonAccessLevel.trim()
+    if (!idToSend || !accessLevelToSend) return;
 
     fetch(`${API_URL}/api/users`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ user_id: String(idToSend) })
+      body: JSON.stringify({ user_id: String(idToSend), accessLevel: String(accessLevelToSend) })
     })
     .then((res) => {
       if (res.ok) {
@@ -232,6 +235,7 @@ function App() {
             deleteUser={deleteUser}
             searchUsers={searchUsers}
             valueInputSearchUsers={valueInputSearchUsers}
+            addInfoAccessLevel={addInfoAccessLevel}
           />
         } />
         <Route path="/controlling" element={

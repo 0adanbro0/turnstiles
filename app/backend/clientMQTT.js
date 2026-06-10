@@ -1,4 +1,5 @@
 const mqtt = require('mqtt');
+const isWorkShiftStarted = require('./Logic/clock');
 
 const mqttModule = {
   client: null,
@@ -113,6 +114,18 @@ function connectToMQTTClient(mqttUri, models, state) {
           } else if (!isEntering) {
             await new AccessLog({ user_id: userIdStr, isEntry: false, access: false }).save();
             return sendMqttResponse("0", "no_entry", userIdStr);
+          }
+
+          const user = await User.findOne({ user_id: userIdStr})
+          if(!isWorkShiftStarted(user.startWorkDay, user.endWorkDay)){
+            if(isEntering){
+              await new AccessLog({ user_id: userIdStr, isEntry: true, access: false }).save();
+            }
+            else if(!isEntering){
+              await new AccessLog({ user_id: userIdStr, isEntry: false, access: false }).save();
+            }
+
+            return sendMqttResponse("0", "Work_shift_error", userIdStr);
           }
 
           state.counterCurrentUsersNow = isEntering ? state.counterCurrentUsersNow + 1 : Math.max(0, state.counterCurrentUsersNow - 1);

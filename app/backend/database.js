@@ -2,9 +2,11 @@ const mongoose = require('mongoose');
 
 const UserSchema = new mongoose.Schema({
   user_id: { type: String, required: true, unique: true },
-  name: { type: String, default: 'User' },
+  accessLevel: { type: String, default: 'firstLevel' },
   created_at: { type: Date, default: Date.now },
-  totalWorkMs: { type: Number, default: 0 } 
+  totalWorkMs: { type: Number, default: 0 },
+  startWorkDay: { type: Number, default: 6},
+  endWorkDay: { type: Number, default: 18}
 }, { versionKey: false });
 
 const LogSchema = new mongoose.Schema({
