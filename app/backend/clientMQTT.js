@@ -60,9 +60,9 @@ function connectToMQTTClient(mqttUri, models, state) {
 
       //card processing
       if (topic === 'skud/check') {
-        const { user_id, direction, isAddingCardStatus } = payload;
+        const { user_id, direction, isAddingCardStatus, nameEspReader} = payload;
         
-        if (!user_id) return sendMqttResponse("0", "empty_id", "unknown");
+        if (!user_id) return sendMqttResponse("0", "empty_id", "unknown", nameEspReader);
 
         const userIdStr = String(user_id);
         const isEntering = direction === 'in';
@@ -79,41 +79,41 @@ function connectToMQTTClient(mqttUri, models, state) {
             if (!userExists) {
               const newUser = new User({ user_id: userIdStr, name: `New Card ${userIdStr.slice(-4)}` });
               await newUser.save();
-              return sendMqttResponse("registered", "saved", userIdStr);
+              return sendMqttResponse("registered", "saved", userIdStr, nameEspReader);
             }
-            return sendMqttResponse("exists", "registered", userIdStr);
+            return sendMqttResponse("exists", "registered", userIdStr, nameEspReader);
           }
 
           //emergency function
           if (state.isEmergencyBool) {
             await new AccessLog({ user_id: userIdStr, isEntry: isEntering, access: true, reason: "EMERGENCY" }).save();
-            return sendMqttResponse("1", "emergency_open", userIdStr);
+            return sendMqttResponse("1", "emergency_open", userIdStr, nameEspReader);
           }
 
           const userExists = await User.findOne({ user_id: userIdStr });
           if (!userExists) {
             await new AccessLog({ user_id: userIdStr, isEntry: isEntering, access: false }).save();
-            return sendMqttResponse("404", "unknown", userIdStr);
+            return sendMqttResponse("404", "unknown", userIdStr, nameEspReader);
           }
 
           if (isEntering && state.isLimitWorking && state.counterCurrentUsersNow >= state.usersLimit) {
             await new AccessLog({ user_id: userIdStr, isEntry: true, access: false }).save();
-            return sendMqttResponse("422", "limit", userIdStr);
+            return sendMqttResponse("422", "limit", userIdStr, nameEspReader);
           }
 
           const lastSuccessfulLog = await AccessLog.findOne({ user_id: userIdStr, access: true }).sort({ timestamp: -1 });
           if (lastSuccessfulLog) {
             if (isEntering && lastSuccessfulLog.isEntry === true) {
               await new AccessLog({ user_id: userIdStr, isEntry: true, access: false }).save();
-              return sendMqttResponse("0", "inside", userIdStr);
+              return sendMqttResponse("0", "inside", userIdStr, nameEspReader);
             }
             if (!isEntering && lastSuccessfulLog.isEntry === false) {
               await new AccessLog({ user_id: userIdStr, isEntry: false, access: false }).save();
-              return sendMqttResponse("0", "outside", userIdStr);
+              return sendMqttResponse("0", "outside", userIdStr, nameEspReader);
             }
           } else if (!isEntering) {
             await new AccessLog({ user_id: userIdStr, isEntry: false, access: false }).save();
-            return sendMqttResponse("0", "no_entry", userIdStr);
+            return sendMqttResponse("0", "no_entry", userIdStr, nameEspReader);
           }
 
           const user = await User.findOne({ user_id: userIdStr})
@@ -125,7 +125,7 @@ function connectToMQTTClient(mqttUri, models, state) {
               await new AccessLog({ user_id: userIdStr, isEntry: false, access: false }).save();
             }
 
-            return sendMqttResponse("0", "Work_shift_error", userIdStr);
+            return sendMqttResponse("0", "Work_shift_error", userIdStr, nameEspReader);
           }
 
           state.counterCurrentUsersNow = isEntering ? state.counterCurrentUsersNow + 1 : Math.max(0, state.counterCurrentUsersNow - 1);
@@ -144,7 +144,7 @@ function connectToMQTTClient(mqttUri, models, state) {
             }
           }
 
-          return sendMqttResponse("1", "allowed", userIdStr, );
+          return sendMqttResponse("1", "allowed", userIdStr, nameEspReader);
         } finally {
           //after two seconds access process card
           setTimeout(() => processingCards.delete(userIdStr), 2000);
@@ -159,9 +159,9 @@ function connectToMQTTClient(mqttUri, models, state) {
   });
 }
 
-function sendMqttResponse(status, reason, userId) {
+function sendMqttResponse(status, reason, userId, nameEspReader) {
   if (mqttModule.client && typeof mqttModule.client.publish === 'function') {
-    mqttModule.client.publish('skud/control/response', JSON.stringify({ status, reason, user_id: userId, time: Date.now() }));
+    mqttModule.client.publish('skud/control/response', JSON.stringify({ status, reason, user_id: userId, time: Date.now(), nameEspReader: nameEspReader || "unknown"}));
   } else {
     console.error("[MQTT ERROR] Ошибка публикации ответа: mqttClient не готов.");
   }

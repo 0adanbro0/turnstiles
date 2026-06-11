@@ -6,12 +6,12 @@
 Ticker emergencyTicker;
 Ticker addingCardTicker;
 
-const char* ssid = ""; // name of your network!!!
-const char* password = ""; // password of your network!!!
-const char* mqtt_server = ""; // ipv4 of your pc!!!
+const char* ssid = "s24";
+const char* password = "45504550";
+const char* mqtt_server = "10.161.2.220"; 
 const int mqtt_port = 1883;              
 
-#define buzzerPin 10  // buzzer
+#define buzzerPin 10
 
 #define GREEN_LED 2 
 #define RED_LED 4
@@ -29,9 +29,9 @@ bool lastEmergencyState = false;
 
 volatile bool triggerEmergencyBlink = false;
 volatile bool triggerAddingBlink = false;
+volatile bool triggerRegisteredTone = false;
 bool blinkState = false;
 
-//container with constants
 enum ActionState { IDLE, GREEN_OK, RED_ERR, BLUE_ERR, BLUE_LIMIT };
 ActionState currentAction = IDLE;
 
@@ -114,8 +114,9 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
   if (error) return;
 
   String topicStr = String(topic);
+  Serial.println(doc["nameEspReader"].as<String>());
 
-  if (topicStr == "skud/control/response" && doc["nameEspReader"] == "1234567890") {
+  if (topicStr == "skud/control/response" && doc["nameEspReader"].as<String>() == "8C:94:DF:45:F8:B0") {
     String status = doc["status"].as<String>();
     
     if (status == "1") { currentAction = GREEN_OK; }
@@ -155,7 +156,6 @@ void tryReconnectMQTT() {
   }
 }
 
-
 void setup() {
   Serial.begin(115200);
   delay(1000);
@@ -180,6 +180,7 @@ void setup() {
 
   mqttClient.setServer(mqtt_server, mqtt_port);
   mqttClient.setCallback(mqttCallback);
+  mqttClient.setBufferSize(512); 
 }
 
 void sendHeartbeat() {
@@ -236,6 +237,7 @@ void loop() {
     digitalWrite(RED_LED, blinkState ? LOW : HIGH);
     digitalWrite(BLUE_LED_UNKNOWN, LOW);
     tone(buzzerPin, blinkState ? 1500 : 500, 150);
+  }
 
   // adding card function
   if (triggerAddingBlink) {
@@ -245,6 +247,11 @@ void loop() {
     digitalWrite(RED_LED, HIGH);
     digitalWrite(BLUE_LED_UNKNOWN, blinkState ? HIGH : LOW);
     if (blinkState) tone(buzzerPin, 1200, 100); 
+  }
+
+  if (triggerRegisteredTone) {
+    triggerRegisteredTone = false;
+    tone(buzzerPin, 2000, 200);
   }
 
   // heartbeat

@@ -4,10 +4,10 @@
 #include "PubSubClient.h"
 #include "ArduinoJson/ArduinoJson.h"
 
-const char* ssid = ""; // name of your network!!!
-const char* password = ""; // password of your network!!!
-const char* mqtt_server = ""; // ipv4 of your pc!!!
-const int mqtt_port = 1883;                // port Mosquitto
+const char* ssid = "";
+const char* password = "";
+const char* mqtt_server = "";
+const int mqtt_port = 1883;
 
 // RFID 1 (ENTRANCE)
 #define SS1_PIN 5
@@ -81,7 +81,6 @@ void reconnectMQTT() {
 void setup() {
   Serial.begin(115200);
 
-  Serial.print(WiFi.macAddress());
   // wi-fi connection
   WiFi.begin(ssid, password);
   Serial.print("Connecting to WiFi");
@@ -90,6 +89,8 @@ void setup() {
     Serial.print(".");
   }
   Serial.println("\nWiFi Connected");
+
+  Serial.print("----------------" + WiFi.macAddress());
 
   // MQTT settings
   mqttClient.setServer(mqtt_server, mqtt_port);
