@@ -115,7 +115,7 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
 
   String topicStr = String(topic);
 
-  if (topicStr == "skud/control/response") {
+  if (topicStr == "skud/control/response" && doc["nameEspReader"] == "1234567890") {
     String status = doc["status"].as<String>();
     
     if (status == "1") { currentAction = GREEN_OK; }

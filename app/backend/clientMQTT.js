@@ -144,7 +144,7 @@ function connectToMQTTClient(mqttUri, models, state) {
             }
           }
 
-          return sendMqttResponse("1", "allowed", userIdStr);
+          return sendMqttResponse("1", "allowed", userIdStr, );
         } finally {
           //after two seconds access process card
           setTimeout(() => processingCards.delete(userIdStr), 2000);

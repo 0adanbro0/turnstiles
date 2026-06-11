@@ -68,7 +68,6 @@ void reconnectMQTT() {
     if (mqttClient.connect("ESP32_Gate_CARD_Main")) {
       Serial.println("УСПЕШНО");
 
-      mqttClient.subscribe("skud/control/response");
       mqttClient.subscribe("skud/control/status");
     } else {
       Serial.print("ошибка, rc=");
@@ -82,6 +81,7 @@ void reconnectMQTT() {
 void setup() {
   Serial.begin(115200);
 
+  Serial.print(WiFi.macAddress());
   // wi-fi connection
   WiFi.begin(ssid, password);
   Serial.print("Connecting to WiFi");
@@ -112,6 +112,7 @@ void sendMqttRequest(String uid, String gate) {
   doc["user_id"] = uid;
   doc["direction"] = (gate == "ENTRANCE") ? "in" : "out";
   doc["isAddingCardStatus"] = isAddingCard ? "1" : "0";
+  doc["nameEspReader"] = WiFi.macAddress();
 
   String jsonPayload;
   serializeJson(doc, jsonPayload);
