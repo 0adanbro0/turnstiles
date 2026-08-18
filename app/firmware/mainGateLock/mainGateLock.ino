@@ -6,9 +6,9 @@
 Ticker emergencyTicker;
 Ticker addingCardTicker;
 
-const char* ssid = "s24";
-const char* password = "45504550";
-const char* mqtt_server = "10.161.2.220"; 
+const char* ssid = "";
+const char* password = "";
+const char* mqtt_server = ""; 
 const int mqtt_port = 1883;              
 
 #define buzzerPin 10

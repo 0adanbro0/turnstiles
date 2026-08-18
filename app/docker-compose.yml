@@ -31,12 +31,11 @@ services:
   backend:
     build: ./backend
     container_name: esp32_backend
+    env_file:
+      - .env
     depends_on:
       - db
       - mosquitto
-    environment:
-      - mongo_url=mongodb://${DB_NAME}:${DB_PASSWORD}@db:27017/access_db?authSource=admin
-      - MQTT_HOST=mqtt://mosquitto:1883
     ports:
       - "3000:3000"
     restart: always
@@ -44,9 +43,13 @@ services:
   frontend:
     build: 
       context: ./frontend
-      args:
-          - VITE_API_URL=http://${IPV4}:3000
+      # УБИРАЕМ args: VITE_API_URL отсюда
     container_name: react_web_app
+    env_file:
+      - .env
+    # Пробрасываем IP хоста в переменную окружения контейнера
+    environment:
+      - HOST_IP=${IPV4}  # Придет из .env хоста при `docker compose up`
     ports:
       - "80:80"
     restart: always

@@ -20,11 +20,27 @@ function App() {
   const [statusMainLockModule, setStatusMainLockModule] = useState<boolean>(false)
   const [buttonAccessLevel, setButtonAccessLevel] = useState<string>('firstLevel')
 
-  // Use refs to stop sending requests on the first render (component mount)
   const isFirstRenderEmergency = useRef(true);
   const isFirstRenderAdding = useRef(true);
 
   const API_URL = import.meta.env.VITE_API_URL;
+  const API_KEY = import.meta.env.VITE_API_KEY; // ОБЯЗАТЕЛЬНО: добавь VITE_API_KEY в .env фронтенда
+
+  // --- УНИВЕРСАЛЬНАЯ ОБЕРТКА ДЛЯ FETCH (внутри компонента, без новых файлов) ---
+  const apiFetch = useCallback(async <T,>(endpoint: string, options: RequestInit = {}): Promise<T> => {
+    const headers = new Headers(options.headers);
+    headers.set('Content-Type', 'application/json');
+    if (API_KEY) headers.set('X-API-Key', API_KEY); // Автоматически подставляем ключ везде
+
+    const res = await fetch(`${API_URL}${endpoint}`, { ...options, headers });
+
+    if (!res.ok) {
+      const errData = await res.json().catch(() => ({ error: 'Server error' }));
+      throw new Error(errData.error || `HTTP ${res.status}`);
+    }
+    if (res.status === 204) return undefined as T;
+    return res.json();
+  }, [API_URL, API_KEY]);
 
   // Calculate entered and exited users
   const { counterIn, counterOut } = useMemo(() => {
@@ -38,100 +54,87 @@ function App() {
     });
     return { counterIn: countIn, counterOut: countOut };
   }, [logs]);
-
+  
   const getUsers = useCallback(() => {
-    fetch(`${API_URL}/api/users`)
-      .then(res => res.json())
-      .then(json => setUsers(json))
+    apiFetch<{ data: AddNewUser[]; total: number }>('/api/users') // Тип ответа бэкенда
+      .then(json => setUsers(json.data)) // <--- БЕРЕМ .data
       .catch(err => console.error("Ошибка загрузки пользователей:", err));
-  }, [API_URL]);
+  }, [apiFetch]);
 
   const getLogs = useCallback(() => {
-    fetch(`${API_URL}/api/data`)
-      .then(res => res.json())
-      .then(json => setLogs(json))
+    apiFetch<{ data: EntryLogs[]; total: number }>('/api/data') // Тип ответа бэкенда
+      .then(json => setLogs(json.data)) // <--- БЕРЕМ .data
       .catch(err => console.error("Ошибка загрузки истории:", err));
-  }, [API_URL]);
+  }, [apiFetch]);
 
+  // totalWorkHours тоже возвращает массив отчетов, не пользователей, оставляем как есть (console.log)
   const totalWorkHours = useCallback(() => {
-    fetch(`${API_URL}/api/users/work-time`)
-      .then(res => res.json())
-      .then(json => setUsers(json))
-      .catch(err => console.error("Ошибка обновления занятости", err));
-  }, [API_URL]);
+    apiFetch<any[]>('/api/users/work-time')
+      .then(json => console.log('[WorkTime Report]', json))
+      .catch(err => console.error("Ошибка отчета по часам:", err));
+  }, [apiFetch]);
 
   const deleteUser = (id: string) => {
-    fetch(`${API_URL}/api/users/${id}`, { method: 'DELETE' })
-      .then((res) => {
-        if (res.ok) setUsers(prevUsers => prevUsers.filter(user => user._id !== id));
-      })
+    apiFetch(`/api/users/${id}`, { method: 'DELETE' })
+      .then(() => setUsers(prevUsers => prevUsers.filter(user => user._id !== id)))
       .catch(err => console.error("Ошибка при удалении пользователя:", err));
   };
 
   const endWorkDay = () => {
-    fetch(`${API_URL}/api/data-all`, { method: 'DELETE' })
-      .then((res) => {
-        if (res.ok) setLogs([]);
-      })
+    apiFetch('/api/data-all', { method: 'DELETE' })
+      .then(() => setLogs([]))
       .catch(err => console.error("Ошибка при очистке логов:", err));
   };
 
-  // 1. LIMIT SYNC: Send request only when the number limit changes
+  // 1. LIMIT SYNC: Payload исправлен на { usersLimitParam: number }
   useEffect(() => {
-    fetch(`${API_URL}/api/set-users-limit`, {
+    apiFetch('/api/set-users-limit', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ limitUsers: currentLimit })
+      body: JSON.stringify({ usersLimitParam: currentLimit })
     })
     .catch(err => console.error("Ошибка синхронизации лимита:", err));
-  }, [currentLimit, API_URL]);
+  }, [currentLimit, apiFetch]);
 
-  // 2. EMERGENCY MODE: Skip the first render
+  // 2. EMERGENCY MODE: Payload исправлен на { value: boolean }
   useEffect(() => {
     if (isFirstRenderEmergency.current) {
       isFirstRenderEmergency.current = false;
       return;
     }
-    fetch(`${API_URL}/api/emergency-situation`, {
+    apiFetch('/api/emergency-situation', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ isEmergency })
+      body: JSON.stringify({ value: isEmergency })
     })
     .catch(err => console.error("Ошибка изменения статуса ЧС:", err));
-  }, [isEmergency, API_URL]);
+  }, [isEmergency, apiFetch]);
 
+  // 3. ADDING CARD MODE: Payload исправлен на { value: boolean }
   useEffect(() => {
     if (isFirstRenderAdding.current) {
       isFirstRenderAdding.current = false;
       return;
     }
-    fetch(`${API_URL}/api/adding-card`, {
+    apiFetch('/api/adding-card', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ isAddingCard })
+      body: JSON.stringify({ value: isAddingCard })
     })
     .catch(err => console.error("Ошибка изменения режима добавления карт:", err));
-  }, [isAddingCard, API_URL]);
+  }, [isAddingCard, apiFetch]);
 
   const getDevicesStatus = useCallback(() => {
-    fetch(`${API_URL}/api/connection-to-server`)
-      .then(res => {
-        if (!res.ok) throw new Error('Ошибка сервера');
-        return res.json() as Promise<ConnectionResponse>; // Приводим к нужному типу
+    apiFetch<ConnectionResponse>('/api/connection-to-server')
+      .then((data) => {
+        setCardModuleStatus(Boolean(data?.connected));
+        setStatusMainLockModule(Boolean(data?.connectedLock));
       })
-      .then((data: ConnectionResponse) => {
-        // ИСПРАВЛЕНО: Достаем флаг прямо из объекта data.connected
-        setCardModuleStatus(Boolean(data && data.connected));
-        setStatusMainLockModule(Boolean(data && data.connectedLock));
-      })
-      .catch((err: unknown) => {
+      .catch((err) => {
         console.error("Ошибка запроса статуса ESP32:", err);
         setCardModuleStatus(false);
         setStatusMainLockModule(false);
       });
-  }, [API_URL]);
+  }, [apiFetch]);
 
-  // Control handlers
+  // Control handlers (передаются в дочерние компоненты без изменений)
   const setIsAddingCardFunc = (arg: boolean) => setIsAddingCard(arg);
   const setLimitUsers = (param: number) => setCurrentLimit(param);
   const setIsEmergencyFunc = (arg: boolean) => setIsEmergency(arg);
@@ -145,34 +148,30 @@ function App() {
     const accessLevelToSend:string = buttonAccessLevel.trim()
     if (!idToSend || !accessLevelToSend) return;
 
-    fetch(`${API_URL}/api/users`, {
+    // Backend ожидает user_id, name?, accessLevel? ... strict schema.
+    // Добавляем name: '' чтобы не падать на strict валидации, если бэкенд ждет name.
+    apiFetch<AddNewUser>('/api/users', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ user_id: String(idToSend), accessLevel: String(accessLevelToSend) })
+      body: JSON.stringify({ user_id: idToSend, accessLevel: accessLevelToSend, name: '' })
     })
-    .then((res) => {
-      if (res.ok) {
-        getUsers();
-        setValueInputAdd('');
-      }
+    .then(() => {
+      getUsers();
+      setValueInputAdd('');
     })
     .catch(err => console.error("Ошибка добавления пользователя:", err));
   };
 
   const addUserSearch = (id: string) => {
     if (!id) return;
-    fetch(`${API_URL}/api/users`, {
+    apiFetch<AddNewUser>('/api/users', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ user_id: String(id) })
+      body: JSON.stringify({ user_id: id, name: '', accessLevel: buttonAccessLevel })
     })
-    .then((res) => {
-      if (res.ok) getUsers();
-    })
+    .then(() => getUsers())
     .catch(err => console.error("Ошибка при быстром добавлении пользователя:", err));
   };
 
-  // Get initial data when the app starts
+  // Initial data load
   useEffect(() => { 
     getLogs();
     getUsers();
@@ -185,19 +184,11 @@ function App() {
     return () => clearInterval(interval);
   }, [getDevicesStatus]);
 
-  // Data polling (Update arrays of dependencies for actual closures)
+  // Data polling
   useEffect(() => {
-    const logsInterval = setInterval(() => {
-      getLogs();
-    }, 3000);
-
-    const hoursInterval = setInterval(() => {
-      totalWorkHours();
-    }, 60000);
-
-    const usersRerender = setInterval(() => {
-      getUsers();
-    }, 3000);
+    const logsInterval = setInterval(() => { getLogs(); }, 3000);
+    const hoursInterval = setInterval(() => { totalWorkHours(); }, 60000);
+    const usersRerender = setInterval(() => { getUsers(); }, 3000);
 
     return () => {
       clearInterval(usersRerender);
