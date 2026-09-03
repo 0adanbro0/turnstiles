@@ -117,7 +117,9 @@ export function connectToMQTTClient(mqttUri, models, state) {
       
       const { user_id, direction, isAddingCardStatus, nameEspReader } = parsed.data;
       const userIdStr = String(user_id);
+      console.log(`USER - ${userIdStr}`);
       const isEntering = direction === 'in';
+      console.log(`Entering - ${isEntering ? 'In' : 'Out'}`);
 
       // Anti-bounce / Duplicate protection
       if (processingCards.has(userIdStr)) {
@@ -175,12 +177,14 @@ async function processAccessLogic({ userIdStr, isEntering, isAddingCardStatus, n
   // 3. ПОЛЬЗОВАТЕЛЬ
   const user = await User.findOne({ user_id: userIdStr }).lean();
   if (!user) {
+    console.log("DENIED_UNKNOWN");
     await AccessLog.create({ user_id: userIdStr, isEntry: isEntering, access: false, reason: 'DENIED_UNKNOWN', timestamp: now });
     return MQTT_RESPONSE.DENIED_UNKNOWN;
   }
 
   // 4. ЛИМИТ МЕСТ (Только на вход)
   if (isEntering && state.isLimitWorking && state.counterCurrentUsersNow >= state.usersLimit) {
+    console.log("DENIED_LIMIT");
     await AccessLog.create({ user_id: userIdStr, isEntry: true, access: false, reason: 'DENIED_LIMIT', timestamp: now });
     return MQTT_RESPONSE.DENIED_LIMIT;
   }
@@ -192,11 +196,13 @@ async function processAccessLogic({ userIdStr, isEntering, isAddingCardStatus, n
     if (isEntering && lastLog.isEntry) return MQTT_RESPONSE.DENIED_INSIDE;       // Уже внутри
     if (!isEntering && !lastLog.isEntry) return MQTT_RESPONSE.DENIED_OUTSIDE;   // Уже снаружи
   } else if (!isEntering) {
+    console.log("DENIED_NO_ENTRY");
     return MQTT_RESPONSE.DENIED_NO_ENTRY; // Выход без входа
   }
 
   // 6. ГРАФИК СМЕН
-  if (!isWorkShiftStarted(user.startWorkDay, user.endWorkDay, now)) {
+/**  if (!isWorkShiftStarted(user.startWorkDay, user.endWorkDay, now)) {
+    console.log(`Denied shift`);
     await AccessLog.create({ 
       user_id: userIdStr, 
       isEntry: isEntering, 
@@ -205,13 +211,14 @@ async function processAccessLogic({ userIdStr, isEntering, isAddingCardStatus, n
       timestamp: now 
     });
     return MQTT_RESPONSE.DENIED_SHIFT;
-  }
+  } */
 
   // 7. РАЗРЕШЕНО
   // Атомарное обновление счетчика в памяти (JS single-threaded, безопасно для одного процесса)
   state.counterCurrentUsersNow += isEntering ? 1 : -1;
   if (state.counterCurrentUsersNow < 0) state.counterCurrentUsersNow = 0;
 
+  console.log(`ALLOWED`);
   // Запись лога УСПЕХА
   await AccessLog.create({ 
     user_id: userIdStr, 

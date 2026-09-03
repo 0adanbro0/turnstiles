@@ -6,9 +6,9 @@
 Ticker emergencyTicker;
 Ticker addingCardTicker;
 
-const char* ssid = "";
-const char* password = "";
-const char* mqtt_server = ""; 
+const char* ssid = "s24";
+const char* password = "45504550";
+const char* mqtt_server = "10.226.84.220"; 
 const int mqtt_port = 1883;              
 
 #define buzzerPin 10
@@ -166,7 +166,7 @@ void setup() {
   pinMode(BLUE_LED_UNKNOWN, OUTPUT);
 
   digitalWrite(RED_LED, HIGH);
-  digitalWrite(GREEN_LED, HIGH);
+  digitalWrite(GREEN_LED, LOW);
   digitalWrite(BLUE_LED_UNKNOWN, LOW);
 
   WiFi.mode(WIFI_STA);
@@ -210,7 +210,7 @@ void loop() {
   if ((isEmergency != lastEmergencyState && !isEmergency) || 
       (isAddingCard != lastAddingCardState && !isAddingCard)) {
     digitalWrite(RED_LED, HIGH);
-    digitalWrite(GREEN_LED, HIGH);
+    digitalWrite(GREEN_LED, LOW);
     digitalWrite(BLUE_LED_UNKNOWN, LOW);
     noTone(buzzerPin);
   }
@@ -233,7 +233,7 @@ void loop() {
   if (triggerEmergencyBlink) {
     triggerEmergencyBlink = false;
     blinkState = !blinkState;
-    digitalWrite(GREEN_LED, HIGH);
+    digitalWrite(GREEN_LED, blinkState ? HIGH : LOW);
     digitalWrite(RED_LED, blinkState ? LOW : HIGH);
     digitalWrite(BLUE_LED_UNKNOWN, LOW);
     tone(buzzerPin, blinkState ? 1500 : 500, 150);
@@ -243,7 +243,7 @@ void loop() {
   if (triggerAddingBlink) {
     triggerAddingBlink = false;
     blinkState = !blinkState;
-    digitalWrite(GREEN_LED, HIGH);
+    digitalWrite(GREEN_LED, LOW);
     digitalWrite(RED_LED, HIGH);
     digitalWrite(BLUE_LED_UNKNOWN, blinkState ? HIGH : LOW);
     if (blinkState) tone(buzzerPin, 1200, 100); 

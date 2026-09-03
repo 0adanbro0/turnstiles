@@ -4,9 +4,9 @@
 #include "PubSubClient.h"
 #include "ArduinoJson/ArduinoJson.h"
 
-const char* ssid = "";
-const char* password = "";
-const char* mqtt_server = "";
+const char* ssid = "s24";
+const char* password = "45504550";
+const char* mqtt_server = "10.226.84.220";
 const int mqtt_port = 1883;
 
 // RFID 1 (ENTRANCE)
