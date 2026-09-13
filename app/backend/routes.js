@@ -132,7 +132,7 @@ export function registerRoutes(app, models, state) {
       _id: u._id,
       user_id: u.user_id,
       name: u.name,
-      totalWorkHours: Number((u.totalWorkMs / 3_600_000).toFixed(2)),
+      totalWorkHours: u.totalWorkMs,
       totalWorkMs: u.totalWorkMs,
     }));
     res.json(report);

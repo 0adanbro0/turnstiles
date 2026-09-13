@@ -4,7 +4,7 @@ export interface AddNewUser {
   _id: string;
   user_id: string;
   accessLevel: string;
-  totalWorkHours: number;
+  totalWorkMs: number;
 }
 
 export interface EntryLogs {

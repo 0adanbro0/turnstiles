@@ -67,13 +67,6 @@ function App() {
       .catch(err => console.error("Ошибка загрузки истории:", err));
   }, [apiFetch]);
 
-  // totalWorkHours тоже возвращает массив отчетов, не пользователей, оставляем как есть (console.log)
-  const totalWorkHours = useCallback(() => {
-    apiFetch<any[]>('/api/users/work-time')
-      .then(json => console.log('[WorkTime Report]', json))
-      .catch(err => console.error("Ошибка отчета по часам:", err));
-  }, [apiFetch]);
-
   const deleteUser = (id: string) => {
     apiFetch(`/api/users/${id}`, { method: 'DELETE' })
       .then(() => setUsers(prevUsers => prevUsers.filter(user => user._id !== id)))
@@ -187,15 +180,13 @@ function App() {
   // Data polling
   useEffect(() => {
     const logsInterval = setInterval(() => { getLogs(); }, 3000);
-    const hoursInterval = setInterval(() => { totalWorkHours(); }, 60000);
     const usersRerender = setInterval(() => { getUsers(); }, 3000);
 
     return () => {
       clearInterval(usersRerender);
-      clearInterval(hoursInterval);
       clearInterval(logsInterval);
     };
-  }, [getLogs, totalWorkHours, getUsers]);
+  }, [getLogs, getUsers]);
 
   return (
     <BrowserRouter>

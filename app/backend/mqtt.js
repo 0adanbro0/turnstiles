@@ -219,6 +219,7 @@ async function processAccessLogic({ userIdStr, isEntering, isAddingCardStatus, n
   if (state.counterCurrentUsersNow < 0) state.counterCurrentUsersNow = 0;
 
   console.log(`ALLOWED`);
+  
   // Запись лога УСПЕХА
   await AccessLog.create({ 
     user_id: userIdStr, 
@@ -228,12 +229,20 @@ async function processAccessLogic({ userIdStr, isEntering, isAddingCardStatus, n
     timestamp: now 
   });
 
+  console.log(new Date().getTime());
+
   // Расчет рабочего времени (При выходе)
   if (!isEntering && lastLog) {
     const entryTime = new Date(lastLog.timestamp).getTime();
     const durationMs = now.getTime() - entryTime;
     if (durationMs > 0 && durationMs < 24 * 60 * 60 * 1000) { // Защита от багов времени (>24h)
-      await User.updateOne({ user_id: userIdStr }, { $inc: { totalWorkMs: durationMs } });
+      await User.updateOne(
+        { user_id: userIdStr },
+        { $inc: { totalWorkMs: durationMs } }
+      );
+
+      const totalWorkMsDoc = await User.findOne({ user_id: userIdStr }, { totalWorkMs: 1 }).lean();
+      console.log(`Updated totalWorkMs for ${userIdStr}: ${totalWorkMsDoc.totalWorkMs} ms`);
     }
   }
 
@@ -243,6 +252,8 @@ async function processAccessLogic({ userIdStr, isEntering, isAddingCardStatus, n
 /** Публикация ответа на ESP */
 function sendMqttResponse(client, status, reason, userId, nameEspReader) {
   if (!client?.connected) return console.error('[MQTT] Client not connected');
+
+  console.log(`[MQTT] Sending from - ${nameEspReader}`);
   
   client.publish('skud/control/response', JSON.stringify({
     status, reason, user_id: userId, 
