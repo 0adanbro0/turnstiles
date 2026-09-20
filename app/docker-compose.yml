@@ -38,7 +38,6 @@ services:
       - MONGO_URL=mongodb://${DB_NAME}:${DB_PASSWORD}@db:27017/access_db?authSource=admin
       - MQTT_HOST=mqtt://mosquitto:1883
       - TZ=Europe/Moscow        # ВАЖНО: таймзона для смен
-      - NODE_ENV=production
     depends_on:
       - db
       - mosquitto

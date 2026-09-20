@@ -21,8 +21,18 @@ const LogSchema = new mongoose.Schema({
 // Составной индекс для быстрого поиска "последний успешный вход"
 LogSchema.index({ user_id: 1, access: 1, timestamp: -1 });
 
+// Реестр устройств (считыватели и замки)
+const DeviceSchema = new mongoose.Schema({
+  deviceId: { type: String, required: true, unique: true }, // MAC / chip ID, он же device_name в MQTT
+  name: { type: String, default: '' },                      // "Главный вход"
+  role: { type: String, enum: ['reader', 'lock'] },
+  status: { type: String, enum: ['pending', 'approved', 'blocked'], default: 'pending' },
+  targets: { type: [String], default: [] },                 // для reader: deviceId замков, которые он открывает
+}, { versionKey: false, timestamps: true });
+
 export const User = mongoose.model('User', UserSchema);
 export const AccessLog = mongoose.model('AccessLog', LogSchema);
+export const Device = mongoose.model('Device', DeviceSchema);
 
 export async function connectToMongoDB(uri) {
   // Настройки пула соединений для продакшена
@@ -31,11 +41,11 @@ export async function connectToMongoDB(uri) {
     serverSelectionTimeoutMS: 5000,
     socketTimeoutMS: 45000,
   });
-  console.log('[MongoDB] Connected successfully');
-  
+
   // Убеждаемся, что индексы созданы (только при старте в dev)
   if (process.env.NODE_ENV !== 'production') {
     await User.syncIndexes();
     await AccessLog.syncIndexes();
+    await Device.syncIndexes();
   }
 }

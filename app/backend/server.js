@@ -4,8 +4,14 @@ import cors from 'cors';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
 import { config, isDev } from './config.js';
-import { connectToMongoDB, User, AccessLog } from './database.js';
-import { connectToMQTTClient, broadcastSystemStatus } from './mqtt.js';
+import { connectToMongoDB, User, AccessLog, Device } from './database.js';
+import {
+  connectToMQTTClient,
+  broadcastSystemStatus,
+  loadDevices,
+  reloadDevice,
+  getDevicesSnapshot,
+} from './mqtt.js';
 import { registerRoutes } from './routes.js';
 import { errorHandler, asyncHandler } from './middleware.js';
 
@@ -58,10 +64,12 @@ const state = {
   isLimitWorking: false,
   isEmergencyBool: false,
   isAddingCardBool: false,
-  currentTimeCard: 0,
-  currentTimeLock: 0,
-  StatusCardModuleConnection: false,
-  StatusMainLockModuleConnection: false,
+  addingCardReaderId: null, // если задан - карты регистрирует только эта читалка
+
+  // Реестр устройств (кэш коллекции Device). Наполняется через loadDevices() ниже.
+  // Заменил: currentTimeCard, currentTimeLock, StatusCardModuleConnection,
+  // StatusMainLockModuleConnection - теперь статус каждого устройства лежит здесь.
+  devices: new Map(),
 };
 
 // Делаем доступным для MQTT (broadcast)
@@ -72,15 +80,22 @@ global.state = state;     // для mqtt.js если он читает отту�
 await connectToMongoDB(config.MONGO_URL);
 console.log('[MongoDB] Connected successfully');
 
-// 1. MQTT Client (передаем ссылку на state)
-global.mqttClient = connectToMQTTClient(config.MQTT_HOST, { User, AccessLog }, state);
+// 0. Загружаем известные устройства в память ДО подключения к MQTT
+await loadDevices(Device, state);
 
-// 2. Broadcast helper для роутов
-app.locals.broadcastStatus = (emergency, adding) => 
-  broadcastSystemStatus(global.mqttClient, emergency, adding);
+// 1. MQTT Client (передаем ссылку на state)
+global.mqttClient = connectToMQTTClient(config.MQTT_HOST, { User, AccessLog, Device }, state);
+
+// 2. Helpers для роутов
+app.locals.broadcastStatus = (emergency, adding) =>
+  broadcastSystemStatus(global.mqttClient, emergency, adding, state.devices);
+// Вызывать из админки после любого изменения устройства (одобрил, сменил targets, удалил)
+app.locals.reloadDevice = (deviceId) => reloadDevice(Device, state, deviceId);
+// Список устройств с online-статусом для админки
+app.locals.getDevices = () => getDevicesSnapshot(state);
 
 // 3. РОУТЫ (ПЕРЕДАЕМ state ЯВНО)
-registerRoutes(app, { User, AccessLog }, state);
+registerRoutes(app, { User, AccessLog, Device }, state);
 
 // 4. Error Handler
 app.use(errorHandler);

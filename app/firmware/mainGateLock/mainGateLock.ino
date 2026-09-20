@@ -8,14 +8,22 @@ Ticker addingCardTicker;
 
 const char* ssid = "s24";
 const char* password = "45504550";
-const char* mqtt_server = "10.226.84.220"; 
+const char* mqtt_server = ""; 
 const int mqtt_port = 1883;              
+
+// Логин/пароль устройства на брокере. Пока брокер открытый, оставьте пустыми.
+const char* mqtt_user = "";
+const char* mqtt_pass = "";
+
+// Роль в системе: "lock" (получает решения от считывателя) или "reader"
+const char* DEVICE_ROLE = "lock";
 
 #define buzzerPin 10
 
 #define GREEN_LED 2 
 #define RED_LED 4
 #define BLUE_LED_UNKNOWN 3
+#define RGB_ESP32C3_MODULE 8
 
 unsigned long timerHeartbeat = 0;
 unsigned long timerMqttReconnect = 0;
@@ -35,6 +43,11 @@ bool blinkState = false;
 enum ActionState { IDLE, GREEN_OK, RED_ERR, BLUE_ERR, BLUE_LIMIT };
 ActionState currentAction = IDLE;
 
+// Идентификатор устройства = MAC. Он же device_name в heartbeat и часть персональных топиков.
+String deviceId;
+String topicResponse;
+String topicStatus;
+
 WiFiClient espClient;
 PubSubClient mqttClient(espClient);
 
@@ -47,11 +60,15 @@ void handleEffects() {
   if (currentAction == GREEN_OK) {
     if (timerLedAction == 0) {
       timerLedAction = millis();
+      rgbLedWrite(RGB_ESP32C3_MODULE, 0, 50, 0); 
       digitalWrite(RED_LED, LOW);
+      digitalWrite(GREEN_LED, HIGH);
       tone(buzzerPin, 1500);
     }
     if (millis() - timerLedAction >= 1000) {
+      rgbLedWrite(RGB_ESP32C3_MODULE, 50, 0, 0); 
       digitalWrite(RED_LED, HIGH);
+      digitalWrite(GREEN_LED, LOW);
       noTone(buzzerPin);
       timerLedAction = 0;
       currentAction = IDLE;
@@ -73,10 +90,12 @@ void handleEffects() {
   if (currentAction == BLUE_ERR) {
     if (timerLedAction == 0) {
       timerLedAction = millis();
+      rgbLedWrite(RGB_ESP32C3_MODULE, 0, 0, 50); 
       digitalWrite(BLUE_LED_UNKNOWN, HIGH);
       tone(buzzerPin, 100);
     }
     if (millis() - timerLedAction >= 1000) {
+      rgbLedWrite(RGB_ESP32C3_MODULE, 0, 0, 0); 
       digitalWrite(BLUE_LED_UNKNOWN, LOW);
       noTone(buzzerPin);
       timerLedAction = 0;
@@ -93,10 +112,12 @@ void handleEffects() {
     unsigned long diff = millis() - timerLedAction;
     if (diff == 0) {
       timerLedAction = millis();
+      rgbLedWrite(RGB_ESP32C3_MODULE, 0, 0, 50); 
       digitalWrite(BLUE_LED_UNKNOWN, HIGH);
       tone(buzzerPin, 1500);
     }
     if (diff >= 1000) {
+      rgbLedWrite(RGB_ESP32C3_MODULE, 0, 0, 0); 
       digitalWrite(BLUE_LED_UNKNOWN, LOW);
       noTone(buzzerPin);
       timerLedAction = 0;
@@ -116,7 +137,10 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
   String topicStr = String(topic);
   Serial.println(doc["nameEspReader"].as<String>());
 
-  if (topicStr == "skud/control/response" && doc["nameEspReader"].as<String>() == "8C:94:DF:45:F8:B0") {
+  // Результат сканирования. Сервер сам решает, каким устройствам его отправить (targets
+  // считывателя), поэтому фильтр по MAC считывателя больше не нужен.
+  // Если это устройство управляет замком, открывать можно ТОЛЬКО при status == "1".
+  if (topicStr == topicResponse) {
     String status = doc["status"].as<String>();
     
     if (status == "1") { currentAction = GREEN_OK; }
@@ -128,7 +152,9 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
     }
   }
   
-  if (topicStr == "skud/control/status") {
+  // Статус системы (ЧС, режим карт) приходит в персональный топик.
+  // Неодобренному или заблокированному устройству сервер присылает false/false.
+  if (topicStr == topicStatus) {
     isEmergency = doc["isEmergency"].as<bool>();
     isAddingCard = doc["isAddingCard"].as<bool>();
   }
@@ -144,12 +170,13 @@ void tryReconnectMQTT() {
     timerMqttReconnect = millis();
     Serial.print("[MQTT] Попытка подключения... ");
 
-    String clientId = "ESP32_Gate_Main_Lock";
+    const char* user = strlen(mqtt_user) > 0 ? mqtt_user : nullptr;
+    const char* pass = strlen(mqtt_user) > 0 ? mqtt_pass : nullptr;
 
-    if (mqttClient.connect(clientId.c_str())) {
+    if (mqttClient.connect(deviceId.c_str(), user, pass)) {
       Serial.println("УСПЕШНО");
-      mqttClient.subscribe("skud/control/response");
-      mqttClient.subscribe("skud/control/status");
+      mqttClient.subscribe(topicResponse.c_str());
+      mqttClient.subscribe(topicStatus.c_str());
     } else {
       Serial.printf("ошибка, rc=%d\n", mqttClient.state());
     }
@@ -165,6 +192,7 @@ void setup() {
   pinMode(RED_LED, OUTPUT);
   pinMode(BLUE_LED_UNKNOWN, OUTPUT);
 
+  rgbLedWrite(RGB_ESP32C3_MODULE, 50, 0, 0); 
   digitalWrite(RED_LED, HIGH);
   digitalWrite(GREEN_LED, LOW);
   digitalWrite(BLUE_LED_UNKNOWN, LOW);
@@ -178,15 +206,23 @@ void setup() {
   }
   Serial.println("\nWiFi Connected");
 
+  deviceId = WiFi.macAddress();
+  topicResponse = "skud/dev/" + deviceId + "/response";
+  topicStatus = "skud/dev/" + deviceId + "/status";
+
   mqttClient.setServer(mqtt_server, mqtt_port);
   mqttClient.setCallback(mqttCallback);
   mqttClient.setBufferSize(512); 
+
+  Serial.print("MAC: ");
+  Serial.println(deviceId);
 }
 
 void sendHeartbeat() {
   if (!mqttClient.connected()) return;
   JsonDocument doc;
-  doc["device_name"] = "ESP32_Gate_Main_Lock";
+  doc["device_name"] = deviceId;
+  doc["role"] = DEVICE_ROLE;
   doc["connection"] = "true";
 
   String jsonPayload;
@@ -209,6 +245,7 @@ void loop() {
   //exit from special modes
   if ((isEmergency != lastEmergencyState && !isEmergency) || 
       (isAddingCard != lastAddingCardState && !isAddingCard)) {
+    rgbLedWrite(RGB_ESP32C3_MODULE, 50, 0, 0); 
     digitalWrite(RED_LED, HIGH);
     digitalWrite(GREEN_LED, LOW);
     digitalWrite(BLUE_LED_UNKNOWN, LOW);
@@ -233,6 +270,7 @@ void loop() {
   if (triggerEmergencyBlink) {
     triggerEmergencyBlink = false;
     blinkState = !blinkState;
+    rgbLedWrite(RGB_ESP32C3_MODULE, blinkState ? 0 : 50, blinkState ? 50 : 0, 0); 
     digitalWrite(GREEN_LED, blinkState ? HIGH : LOW);
     digitalWrite(RED_LED, blinkState ? LOW : HIGH);
     digitalWrite(BLUE_LED_UNKNOWN, LOW);
@@ -242,9 +280,10 @@ void loop() {
   // adding card function
   if (triggerAddingBlink) {
     triggerAddingBlink = false;
-    blinkState = !blinkState;
+    blinkState = !blinkState; 
     digitalWrite(GREEN_LED, LOW);
     digitalWrite(RED_LED, HIGH);
+    rgbLedWrite(RGB_ESP32C3_MODULE, 0, 0, blinkState ? 50 : 0); 
     digitalWrite(BLUE_LED_UNKNOWN, blinkState ? HIGH : LOW);
     if (blinkState) tone(buzzerPin, 1200, 100); 
   }
