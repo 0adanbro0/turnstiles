@@ -15,6 +15,9 @@ const TOPIC = {
   // Персональные топики устройства. ESP подписывается на skud/dev/<свой id>/#
   deviceResponse: (deviceId) => `skud/dev/${deviceId}/response`,
   deviceStatus: (deviceId) => `skud/dev/${deviceId}/status`,
+  // Текущее время сервера для синхронизации мигания между платами. Не retained:
+  // устаревшая метка времени хуже, чем её отсутствие.
+  deviceTime: (deviceId) => `skud/dev/${deviceId}/time`,
 };
 
 // deviceId попадает в имя топика, поэтому пускаем только безопасные символы
@@ -219,6 +222,9 @@ export function connectToMQTTClient(mqttUri, models, state) {
         console.log(`[MQTT] ${device_name} is online (${dev.status})`);
         publishDeviceStatus(client, dev, state.isEmergencyBool, state.isAddingCardBool);
       }
+      // Каждый heartbeat (~раз в 5 с) обновляем плате текущее время сервера,
+      // чтобы синхронное мигание не расходилось из-за дрейфа millis()
+      client.publish(TOPIC.deviceTime(device_name), JSON.stringify({ server_time: now }));
       return;
     }
 
