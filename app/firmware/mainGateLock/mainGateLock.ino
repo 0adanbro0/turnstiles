@@ -8,7 +8,7 @@ Ticker addingCardTicker;
 
 const char* ssid = "s24";
 const char* password = "45504550";
-const char* mqtt_server = "10.129.105.220"; 
+const char* mqtt_server = ""; 
 const int mqtt_port = 1883;              
 
 // Логин/пароль устройства на брокере. Пока брокер открытый, оставьте пустыми.
@@ -226,6 +226,7 @@ void setup() {
 
   WiFi.mode(WIFI_STA);
   WiFi.begin(ssid, password);
+  WiFi.setSleep(false);
   Serial.print("Connecting to WiFi");
   while (WiFi.status() != WL_CONNECTED) {
     delay(500);
@@ -326,7 +327,11 @@ void loop() {
   // heartbeat
   if (millis() - timerHeartbeat >= 5000) {
     timerHeartbeat = millis();
+
+    Serial.print("RSSI: ");
+    Serial.println(WiFi.RSSI());
     Serial.print("heartBeat, im alive!");
     sendHeartbeat();
   }
+
 }
