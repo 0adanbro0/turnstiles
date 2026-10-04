@@ -130,6 +130,10 @@ select:disabled { background: var(--surface); color: var(--ink-soft); }
 .btn-ghost { border-color: currentColor; color: inherit; }
 .btn-small { padding: 0.3rem 0.7rem; font-size: 0.9rem; }
 .actions { display: flex; flex-wrap: wrap; gap: 0.75rem; align-items: center; margin-top: 0.5rem; }
+.actions-top { margin-top: 0; }
+.search-field { max-width: 26rem; margin-bottom: 1rem; }
+.edit-row td { background: var(--surface); padding: 1rem 0.75rem; }
+.edit-row .fields { margin-bottom: 0; }
 .form-error { color: var(--danger); font-weight: 500; }
 
 /* ---------- Устройства ---------- */

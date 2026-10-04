@@ -28,6 +28,13 @@ const setLimitSchema = z.object({
 const resetTimeSchema = z.object({ user_id: userIdSchema.optional() }).strict();
 const boolSchema = z.object({ value: z.boolean() }).strict();
 
+const updateUserSchema = z.object({
+  name: z.string().max(100).optional(),
+  startWorkDay: z.number().int().min(0).max(23).optional(),
+  endWorkDay: z.number().int().min(0).max(23).optional(),
+  accessLevel: z.string().max(50).optional(),
+}).strict().refine((b) => Object.keys(b).length > 0, { message: 'Nothing to update' });
+
 // Режим добавления карт: можно ограничить одной читалкой
 const addingCardSchema = z.object({
   value: z.boolean(),
@@ -44,7 +51,11 @@ const updateDeviceSchema = z.object({
 const paginationSchema = z.object({
   page: z.coerce.number().int().positive().default(1),
   limit: z.coerce.number().int().positive().max(500).default(100),
+  search: z.string().trim().max(100).optional(), // общий текстовый поиск, смысл зависит от роута
 }).strict();
+
+// Экранируем спецсимволы regex, чтобы поиск с точкой/скобкой и т.п. не ломал запрос и не вёл себя как regex
+const escapeRegex = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 // --- ПРИНИМАЕМ state КАК 3-Й АРГУМЕНТ ---
 export function registerRoutes(app, models, state) {
@@ -175,13 +186,28 @@ export function registerRoutes(app, models, state) {
 
   // Users CRUD
   app.get('/api/users', requireApiKey, validate(paginationSchema, 'query'), asyncHandler(async (req, res) => {
-    const { page, limit } = req.query;
+    const { page, limit, search } = req.query;
     const skip = (page - 1) * limit;
+
+    let filter = {};
+    if (search) {
+      // Поиск без учёта регистра по имени, номеру карты и уровню доступа
+      const re = new RegExp(escapeRegex(search), 'i');
+      filter = { $or: [{ name: re }, { user_id: re }, { accessLevel: re }] };
+    }
+
     const [users, total] = await Promise.all([
-      User.find().sort({ created_at: -1 }).skip(skip).limit(limit).lean(),
-      User.countDocuments()
+      User.find(filter).sort({ created_at: -1 }).skip(skip).limit(limit).lean(),
+      User.countDocuments(filter)
     ]);
     res.json({ data: users, page, limit, total, pages: Math.ceil(total / limit) });
+  }));
+
+  // Изменение имени, смены и уровня доступа у уже существующего пользователя
+  app.patch('/api/users/:id', requireApiKey, validate(idParamSchema, 'params'), validate(updateUserSchema), asyncHandler(async (req, res) => {
+    const updated = await User.findByIdAndUpdate(req.params.id, { $set: req.body }, { new: true, runValidators: true }).lean();
+    if (!updated) return res.status(404).json({ error: 'User not found' });
+    res.json(updated);
   }));
 
   app.post('/api/users', requireApiKey, validate(createUserSchema), asyncHandler(async (req, res) => {
@@ -198,11 +224,22 @@ export function registerRoutes(app, models, state) {
 
   // Logs
   app.get('/api/data', requireApiKey, validate(paginationSchema, 'query'), asyncHandler(async (req, res) => {
-    const { page, limit } = req.query;
+    const { page, limit, search } = req.query;
     const skip = (page - 1) * limit;
+
+    let filter = {};
+    if (search) {
+      // Поиск по номеру карты и причине (ALLOWED, DENIED_LIMIT и т.п.); "вход"/"выход" тоже ищем текстом
+      const re = new RegExp(escapeRegex(search), 'i');
+      const or = [{ user_id: re }, { reason: re }];
+      if ('вход'.includes(search.toLowerCase())) or.push({ isEntry: true });
+      if ('выход'.includes(search.toLowerCase())) or.push({ isEntry: false });
+      filter = { $or: or };
+    }
+
     const [logs, total] = await Promise.all([
-      AccessLog.find().sort({ timestamp: -1 }).skip(skip).limit(limit).lean(),
-      AccessLog.countDocuments()
+      AccessLog.find(filter).sort({ timestamp: -1 }).skip(skip).limit(limit).lean(),
+      AccessLog.countDocuments(filter)
     ]);
     res.json({ data: logs, page, limit, total, pages: Math.ceil(total / limit) });
   }));

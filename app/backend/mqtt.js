@@ -335,7 +335,7 @@ async function processAccessLogic({ userIdStr, isEntering, readerId, state, User
   }
 
   // 6. ГРАФИК СМЕН
-/**  if (!isWorkShiftStarted(user.startWorkDay, user.endWorkDay, now)) {
+  if (!isWorkShiftStarted(user.startWorkDay, user.endWorkDay, now)) {
     console.log(`Denied shift`);
     await AccessLog.create({ 
       user_id: userIdStr, 
@@ -345,7 +345,7 @@ async function processAccessLogic({ userIdStr, isEntering, readerId, state, User
       timestamp: now 
     });
     return MQTT_RESPONSE.DENIED_SHIFT;
-  } */
+  }
 
   // 7. РАЗРЕШЕНО
   state.counterCurrentUsersNow += isEntering ? 1 : -1;

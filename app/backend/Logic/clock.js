@@ -7,14 +7,14 @@
  */
 export default function isWorkShiftStarted(startHour, endHour, now = new Date()) {
   if (typeof startHour !== 'number' || typeof endHour !== 'number') return false;
-  
-  const currentHour = now.getHours();
-  
-  // Смена может переходить через полночь (на всякий случай)
-  if (startHour <= endHour) {
-    return currentHour >= startHour && currentHour <= endHour;
+
+  const current = now.getHours() * 60 + now.getMinutes();
+  const start = startHour * 60;
+  const end = endHour * 60;
+
+  if (start <= end) {
+    return current >= start && current < end;
   } else {
-    // Напр. 22:00 - 06:00
-    return currentHour >= startHour || currentHour <= endHour;
+    return current >= start || current < end;
   }
 }

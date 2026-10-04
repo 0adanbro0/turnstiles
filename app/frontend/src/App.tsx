@@ -149,30 +149,47 @@ function usePolling(load: () => Promise<void>, ms: number) {
 // Постраничный список с живым обновлением (журнал, пользователи)
 function usePagedList<T>(call: Call, notify: Notify, path: string) {
   const [page, setPage] = useState(1);
+  const [queryText, setQueryText] = useState('');    // то, что видно в поле ввода
+  const [search, setSearch] = useState('');           // то, что реально ушло в запрос (с задержкой)
   const [list, setList] = useState<Paged<T> | null>(null);
   const pageRef = useRef(page);
+  const searchRef = useRef(search);
   useEffect(() => {
     pageRef.current = page;
   }, [page]);
+  useEffect(() => {
+    searchRef.current = search;
+  }, [search]);
+
+  // Debounce: не долбим сервер на каждое нажатие клавиши
+  useEffect(() => {
+    const id = window.setTimeout(() => {
+      setSearch(queryText.trim());
+      setPage(1);
+    }, 400);
+    return () => window.clearTimeout(id);
+  }, [queryText]);
 
   const load = useCallback(
     async (silent = false) => {
       try {
-        const res = await call<Paged<T>>(`${path}?page=${page}&limit=${PAGE_SIZE}`);
-        if (pageRef.current !== page) return; // пока ждали ответ, страницу уже сменили
+        const q = search ? `&search=${encodeURIComponent(search)}` : '';
+        const res = await call<Paged<T>>(`${path}?page=${page}&limit=${PAGE_SIZE}${q}`);
+        // Пока ждали ответ, страница или поисковый запрос уже сменились - результат устарел
+        if (pageRef.current !== page || searchRef.current !== search) return;
         if (res.data.length === 0 && page > 1) setPage(page - 1);
         else setList(res);
       } catch (e) {
         if (!silent) notify(errorText(e), true); // при фоновом опросе ошибки не показываем, статус связи виден в верхней полосе
       }
     },
-    [call, notify, page, path],
+    [call, notify, page, path, search],
   );
 
   const poll = useCallback(() => load(true), [load]);
   usePolling(poll, LIVE_MS);
 
-  return { list, page, setPage, load };
+  return { list, page, setPage, load, queryText, setQueryText };
 }
 
 const formatWork = (ms: number) => `${Math.floor(ms / 3_600_000)} ч ${Math.floor((ms % 3_600_000) / 60_000)} мин`;
@@ -615,8 +632,9 @@ function DeviceRow(props: {
 
 // ---------- Пользователи ----------
 function UsersTab({ call, run, notify }: { call: Call; run: Run; notify: Notify }) {
-  const { list, page, setPage, load } = usePagedList<UserRow>(call, notify, '/api/users');
+  const { list, page, setPage, load, queryText, setQueryText } = usePagedList<UserRow>(call, notify, '/api/users');
   const [form, setForm] = useState({ user_id: '', name: '', accessLevel: 'firstLevel', startWorkDay: '6', endWorkDay: '18' });
+  const [editingId, setEditingId] = useState<string | null>(null);
 
   const set = (field: keyof typeof form) => (e: { target: { value: string } }) => setForm({ ...form, [field]: e.target.value });
 
@@ -644,6 +662,18 @@ function UsersTab({ call, run, notify }: { call: Call; run: Run; notify: Notify 
   return (
     <>
       <section className="block">
+        <h2>Пользователи{list ? `: ${list.total}` : ''}</h2>
+        <div className="actions actions-top">
+          <button
+            className="btn btn-danger"
+            onClick={() => window.confirm('Сбросить отработанное время у всех пользователей?') && after(run(() => call('/api/users/reset-time', 'POST', {}), 'Время сброшено у всех'))}
+          >
+            Сбросить время у всех
+          </button>
+        </div>
+      </section>
+
+      <section className="block">
         <h2>Новый пользователь</h2>
         <form className="fields" onSubmit={create}>
           <label className="field"><span>Номер карты</span><input value={form.user_id} onChange={set('user_id')} required maxLength={64} /></label>
@@ -656,7 +686,10 @@ function UsersTab({ call, run, notify }: { call: Call; run: Run; notify: Notify 
       </section>
 
       <section className="block">
-        <h2>Пользователи{list ? `: ${list.total}` : ''}</h2>
+        <label className="field search-field">
+          <span>Поиск по имени, номеру карты или уровню доступа</span>
+          <input value={queryText} onChange={(e) => setQueryText(e.target.value)} placeholder="Например, Иванов или firstLevel" />
+        </label>
         <div className="table-wrap">
           <table>
             <thead>
@@ -670,90 +703,142 @@ function UsersTab({ call, run, notify }: { call: Call; run: Run; notify: Notify 
               </tr>
             </thead>
             <tbody>
-              {list?.data.map((u) => (
-                <tr key={u._id}>
-                  <td>{u.name || 'Без имени'}</td>
-                  <td>{u.user_id}</td>
-                  <td>{u.accessLevel}</td>
-                  <td>{u.startWorkDay}:00 до {u.endWorkDay}:00</td>
-                  <td>{formatWork(u.totalWorkMs)}</td>
+              {list?.data.map((u) =>
+                editingId === u._id ? (
+                  <UserEditRow
+                    key={u._id}
+                    user={u}
+                    save={(patch) => {
+                      setEditingId(null);
+                      after(run(() => call(`/api/users/${u._id}`, 'PATCH', patch), 'Пользователь сохранён'));
+                    }}
+                    cancel={() => setEditingId(null)}
+                  />
+                ) : (
+                  <tr key={u._id}>
+                    <td>{u.name || 'Без имени'}</td>
+                    <td>{u.user_id}</td>
+                    <td>{u.accessLevel}</td>
+                    <td>{u.startWorkDay}:00 до {u.endWorkDay}:00</td>
+                    <td>{formatWork(u.totalWorkMs)}</td>
+                    <td className="row-actions">
+                      <button className="btn btn-small" onClick={() => setEditingId(u._id)}>Изменить</button>
+                      <button className="btn btn-small" onClick={() => after(run(() => call('/api/users/reset-time', 'POST', { user_id: u.user_id }), 'Время сброшено'))}>Сбросить время</button>
+                      <button
+                        className="btn btn-small btn-danger"
+                        onClick={() => window.confirm(`Удалить пользователя ${u.name || u.user_id}?`) && after(run(() => call(`/api/users/${u._id}`, 'DELETE'), 'Пользователь удалён'))}
+                      >
+                        Удалить
+                      </button>
+                    </td>
+                  </tr>
+                ),
+              )}
+            </tbody>
+          </table>
+        </div>
+        {list && list.data.length === 0 && (
+          <p className="empty">{queryText ? 'По запросу ничего не найдено.' : 'Пользователей пока нет. Добавьте вручную или включите режим добавления карт.'}</p>
+        )}
+        <Pager page={page} pages={list?.pages ?? 1} onPage={setPage} />
+      </section>
+    </>
+  );
+}
+
+function UserEditRow({ user, save, cancel }: { user: UserRow; save: (patch: Partial<UserRow>) => void; cancel: () => void }) {
+  const [name, setName] = useState(user.name);
+  const [accessLevel, setAccessLevel] = useState(user.accessLevel);
+  const [startWorkDay, setStartWorkDay] = useState(String(user.startWorkDay));
+  const [endWorkDay, setEndWorkDay] = useState(String(user.endWorkDay));
+
+  const submit = (e: FormEvent) => {
+    e.preventDefault();
+    save({
+      name: name.trim(),
+      accessLevel: accessLevel.trim() || 'firstLevel',
+      startWorkDay: Number(startWorkDay),
+      endWorkDay: Number(endWorkDay),
+    });
+  };
+
+  return (
+    <tr className="edit-row">
+      <td colSpan={6}>
+        <form className="fields" onSubmit={submit}>
+          <label className="field"><span>Имя</span><input value={name} maxLength={100} autoFocus onChange={(e) => setName(e.target.value)} /></label>
+          <label className="field"><span>Уровень доступа</span><input value={accessLevel} maxLength={50} onChange={(e) => setAccessLevel(e.target.value)} /></label>
+          <label className="field"><span>Смена с (час)</span><input type="number" min={0} max={23} value={startWorkDay} required onChange={(e) => setStartWorkDay(e.target.value)} /></label>
+          <label className="field"><span>Смена до (час)</span><input type="number" min={0} max={23} value={endWorkDay} required onChange={(e) => setEndWorkDay(e.target.value)} /></label>
+          <div className="actions">
+            <button className="btn btn-small btn-primary">Сохранить</button>
+            <button type="button" className="btn btn-small" onClick={cancel}>Отмена</button>
+          </div>
+        </form>
+      </td>
+    </tr>
+  );
+}
+
+// ---------- Журнал ----------
+function LogsTab({ call, run, notify }: { call: Call; run: Run; notify: Notify }) {
+  const { list, page, setPage, load, queryText, setQueryText } = usePagedList<LogRow>(call, notify, '/api/data');
+
+  const after = (p: Promise<boolean>) => void p.then((ok) => { if (ok) void load(); });
+
+  return (
+    <>
+      <section className="block">
+        <h2>Журнал проходов{list ? `: ${list.total}` : ''}</h2>
+        <div className="actions actions-top">
+          <button
+            className="btn btn-danger"
+            onClick={() =>
+              window.confirm('Удалить весь журнал? Счётчик людей внутри тоже обнулится.') && after(run(() => call('/api/data-all', 'DELETE'), 'Журнал очищен'))
+            }
+          >
+            Очистить журнал
+          </button>
+        </div>
+      </section>
+
+      <section className="block">
+        <label className="field search-field">
+          <span>Поиск по номеру карты, причине, «вход» или «выход»</span>
+          <input value={queryText} onChange={(e) => setQueryText(e.target.value)} placeholder="Например, DENIED_LIMIT или номер карты" />
+        </label>
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th scope="col">Время</th>
+                <th scope="col">Карта</th>
+                <th scope="col">Направление</th>
+                <th scope="col">Результат</th>
+                <th scope="col"><span className="visually-hidden">Действия</span></th>
+              </tr>
+            </thead>
+            <tbody>
+              {list?.data.map((l) => (
+                <tr key={l._id}>
+                  <td>{formatTime(l.timestamp)}</td>
+                  <td>{l.user_id}</td>
+                  <td>{l.isEntry ? 'Вход' : 'Выход'}</td>
+                  <td className="result" data-ok={l.access}>{REASON_LABEL[l.reason] ?? l.reason}</td>
                   <td className="row-actions">
-                    <button className="btn btn-small" onClick={() => after(run(() => call('/api/users/reset-time', 'POST', { user_id: u.user_id }), 'Время сброшено'))}>Сбросить время</button>
-                    <button
-                      className="btn btn-small btn-danger"
-                      onClick={() => window.confirm(`Удалить пользователя ${u.name || u.user_id}?`) && after(run(() => call(`/api/users/${u._id}`, 'DELETE'), 'Пользователь удалён'))}
-                    >
-                      Удалить
-                    </button>
+                    <button className="btn btn-small btn-danger" onClick={() => after(run(() => call(`/api/data/${l._id}`, 'DELETE'), 'Запись удалена'))}>Удалить</button>
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
-        {list && list.data.length === 0 && <p className="empty">Пользователей пока нет. Добавьте вручную или включите режим добавления карт.</p>}
+        {list && list.data.length === 0 && (
+          <p className="empty">{queryText ? 'По запросу ничего не найдено.' : 'Записей пока нет. Они появятся после первого сканирования карты.'}</p>
+        )}
         <Pager page={page} pages={list?.pages ?? 1} onPage={setPage} />
-        <div className="actions">
-          <button
-            className="btn btn-danger"
-            onClick={() => window.confirm('Сбросить отработанное время у всех пользователей?') && after(run(() => call('/api/users/reset-time', 'POST', {}), 'Время сброшено у всех'))}
-          >
-            Сбросить время у всех
-          </button>
-        </div>
       </section>
     </>
-  );
-}
-
-// ---------- Журнал ----------
-function LogsTab({ call, run, notify }: { call: Call; run: Run; notify: Notify }) {
-  const { list, page, setPage, load } = usePagedList<LogRow>(call, notify, '/api/data');
-
-  const after = (p: Promise<boolean>) => void p.then((ok) => { if (ok) void load(); });
-
-  return (
-    <section className="block">
-      <h2>Журнал проходов{list ? `: ${list.total}` : ''}</h2>
-      <div className="table-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th scope="col">Время</th>
-              <th scope="col">Карта</th>
-              <th scope="col">Направление</th>
-              <th scope="col">Результат</th>
-              <th scope="col"><span className="visually-hidden">Действия</span></th>
-            </tr>
-          </thead>
-          <tbody>
-            {list?.data.map((l) => (
-              <tr key={l._id}>
-                <td>{formatTime(l.timestamp)}</td>
-                <td>{l.user_id}</td>
-                <td>{l.isEntry ? 'Вход' : 'Выход'}</td>
-                <td className="result" data-ok={l.access}>{REASON_LABEL[l.reason] ?? l.reason}</td>
-                <td className="row-actions">
-                  <button className="btn btn-small btn-danger" onClick={() => after(run(() => call(`/api/data/${l._id}`, 'DELETE'), 'Запись удалена'))}>Удалить</button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-      {list && list.data.length === 0 && <p className="empty">Записей пока нет. Они появятся после первого сканирования карты.</p>}
-      <Pager page={page} pages={list?.pages ?? 1} onPage={setPage} />
-      <div className="actions">
-        <button
-          className="btn btn-danger"
-          onClick={() =>
-            window.confirm('Удалить весь журнал? Счётчик людей внутри тоже обнулится.') && after(run(() => call('/api/data-all', 'DELETE'), 'Журнал очищен'))
-          }
-        >
-          Очистить журнал
-        </button>
-      </div>
-    </section>
   );
 }
 
