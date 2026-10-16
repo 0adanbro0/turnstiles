@@ -47,7 +47,11 @@ const FirstPage = ({ users, addInfoAccessLevel, valueInput, addUsersInput, addUs
                     <h2><b style={{ color: '#007bff' }}>{user.user_id}</b></h2>
                     <h2><b style={user.accessLevel === "thirdLevel" ? {color: '#c5a059'} : {color: '#1e40af'}}>{user.accessLevel}</b></h2>
                     <Button className={'buttonAction'} onclick={() => deleteUser(user._id)} content={'удалить пользователя'}/>
-                    <h2>{user.totalWorkHours ? user.totalWorkHours : 0} секунд</h2>
+                    <h2>{user.totalWorkMs < 60_000 
+                          ? `${Math.floor(user.totalWorkMs / 1000)} сек` 
+                          : user.totalWorkMs < 3600_000 
+                            ? `${Math.floor(user.totalWorkMs / 60_000)} мин` 
+                            : `${Math.floor(user.totalWorkMs / 3600_000)} ч`}</h2>
                   </div>
                 ))
               }

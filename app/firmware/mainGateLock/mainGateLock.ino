@@ -6,16 +6,24 @@
 Ticker emergencyTicker;
 Ticker addingCardTicker;
 
-const char* ssid = ""; // name of your network!!!
-const char* password = ""; // password of your network!!!
-const char* mqtt_server = ""; // ipv4 of your pc!!!
+const char* ssid = "s24";
+const char* password = "45504550";
+const char* mqtt_server = ""; 
 const int mqtt_port = 1883;              
 
-#define buzzerPin 10  // buzzer
+// Логин/пароль устройства на брокере. Пока брокер открытый, оставьте пустыми.
+const char* mqtt_user = "";
+const char* mqtt_pass = "";
+
+// Роль в системе: "lock" (получает решения от считывателя) или "reader"
+const char* DEVICE_ROLE = "lock";
+
+#define buzzerPin 10
 
 #define GREEN_LED 2 
 #define RED_LED 4
 #define BLUE_LED_UNKNOWN 3
+#define RGB_ESP32C3_MODULE 8
 
 unsigned long timerHeartbeat = 0;
 unsigned long timerMqttReconnect = 0;
@@ -27,13 +35,36 @@ bool isAddingCard = false;
 bool lastAddingCardState = false;
 bool lastEmergencyState = false;
 
-volatile bool triggerEmergencyBlink = false;
-volatile bool triggerAddingBlink = false;
+volatile bool triggerRegisteredTone = false;
 bool blinkState = false;
 
-//container with constants
+// Мигание в особых режимах считается от АБСОЛЮТНОГО времени (синхронизированного с сервером),
+// а не от момента включения режима: все платы переключаются в одну и ту же миллисекунду,
+// независимо от того, когда каждая из них узнала о смене режима.
+int currentMode = 0;              // 0 - обычный, 1 - ЧС, 2 - добавление карт
+uint64_t lastPhase = 0;
+bool phaseInit = false;
+
 enum ActionState { IDLE, GREEN_OK, RED_ERR, BLUE_ERR, BLUE_LIMIT };
 ActionState currentAction = IDLE;
+
+// Идентификатор устройства = MAC. Он же device_name в heartbeat и часть персональных топиков.
+String deviceId;
+String topicResponse;
+String topicStatus;
+String topicTime;
+
+// --- Синхронизация абсолютного времени с сервером (для синхронного мигания) ---
+bool timeSynced = false;
+uint64_t serverTimeAtSync = 0;   // server_time (мс от эпохи) в момент последней синхронизации
+unsigned long millisAtSync = 0;  // millis() в тот же момент
+
+// Текущее время в мс от эпохи. Пока синхронизации не было, используем millis() как есть:
+// мигание работает, но не выровнено по абсолютному времени с другими платами.
+uint64_t nowMs() {
+  if (!timeSynced) return millis();
+  return serverTimeAtSync + (uint64_t)(millis() - millisAtSync);
+}
 
 WiFiClient espClient;
 PubSubClient mqttClient(espClient);
@@ -47,11 +78,15 @@ void handleEffects() {
   if (currentAction == GREEN_OK) {
     if (timerLedAction == 0) {
       timerLedAction = millis();
+      rgbLedWrite(RGB_ESP32C3_MODULE, 0, 50, 0); 
       digitalWrite(RED_LED, LOW);
+      digitalWrite(GREEN_LED, HIGH);
       tone(buzzerPin, 1500);
     }
     if (millis() - timerLedAction >= 1000) {
+      rgbLedWrite(RGB_ESP32C3_MODULE, 50, 0, 0); 
       digitalWrite(RED_LED, HIGH);
+      digitalWrite(GREEN_LED, LOW);
       noTone(buzzerPin);
       timerLedAction = 0;
       currentAction = IDLE;
@@ -73,10 +108,12 @@ void handleEffects() {
   if (currentAction == BLUE_ERR) {
     if (timerLedAction == 0) {
       timerLedAction = millis();
+      rgbLedWrite(RGB_ESP32C3_MODULE, 0, 0, 50); 
       digitalWrite(BLUE_LED_UNKNOWN, HIGH);
       tone(buzzerPin, 100);
     }
     if (millis() - timerLedAction >= 1000) {
+      rgbLedWrite(RGB_ESP32C3_MODULE, 0, 0, 0); 
       digitalWrite(BLUE_LED_UNKNOWN, LOW);
       noTone(buzzerPin);
       timerLedAction = 0;
@@ -93,10 +130,12 @@ void handleEffects() {
     unsigned long diff = millis() - timerLedAction;
     if (diff == 0) {
       timerLedAction = millis();
+      rgbLedWrite(RGB_ESP32C3_MODULE, 0, 0, 50); 
       digitalWrite(BLUE_LED_UNKNOWN, HIGH);
       tone(buzzerPin, 1500);
     }
     if (diff >= 1000) {
+      rgbLedWrite(RGB_ESP32C3_MODULE, 0, 0, 0); 
       digitalWrite(BLUE_LED_UNKNOWN, LOW);
       noTone(buzzerPin);
       timerLedAction = 0;
@@ -114,8 +153,12 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
   if (error) return;
 
   String topicStr = String(topic);
+  Serial.println(doc["nameEspReader"].as<String>() + " - mac");
 
-  if (topicStr == "skud/control/response" && doc["nameEspReader"] == "1234567890") {
+  // Результат сканирования. Сервер сам решает, каким устройствам его отправить (targets
+  // считывателя), поэтому фильтр по MAC считывателя больше не нужен.
+  // Если это устройство управляет замком, открывать можно ТОЛЬКО при status == "1".
+  if (topicStr == topicResponse) {
     String status = doc["status"].as<String>();
     
     if (status == "1") { currentAction = GREEN_OK; }
@@ -127,9 +170,19 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
     }
   }
   
-  if (topicStr == "skud/control/status") {
+  // Статус системы (ЧС, режим карт) приходит в персональный топик.
+  // Неодобренному или заблокированному устройству сервер присылает false/false.
+  if (topicStr == topicStatus) {
     isEmergency = doc["isEmergency"].as<bool>();
     isAddingCard = doc["isAddingCard"].as<bool>();
+  }
+
+  // Текущее время сервера приходит при каждом heartbeat (~раз в 5 с).
+  // Пересчитываем смещение каждый раз, чтобы не накапливался дрейф millis().
+  if (topicStr == topicTime) {
+    serverTimeAtSync = doc["server_time"].as<uint64_t>();
+    millisAtSync = millis();
+    timeSynced = true;
   }
 }
 
@@ -143,18 +196,19 @@ void tryReconnectMQTT() {
     timerMqttReconnect = millis();
     Serial.print("[MQTT] Попытка подключения... ");
 
-    String clientId = "ESP32_Gate_Main_Lock";
+    const char* user = strlen(mqtt_user) > 0 ? mqtt_user : nullptr;
+    const char* pass = strlen(mqtt_user) > 0 ? mqtt_pass : nullptr;
 
-    if (mqttClient.connect(clientId.c_str())) {
+    if (mqttClient.connect(deviceId.c_str(), user, pass)) {
       Serial.println("УСПЕШНО");
-      mqttClient.subscribe("skud/control/response");
-      mqttClient.subscribe("skud/control/status");
+      mqttClient.subscribe(topicResponse.c_str());
+      mqttClient.subscribe(topicStatus.c_str());
+      mqttClient.subscribe(topicTime.c_str());
     } else {
       Serial.printf("ошибка, rc=%d\n", mqttClient.state());
     }
   }
 }
-
 
 void setup() {
   Serial.begin(115200);
@@ -165,12 +219,14 @@ void setup() {
   pinMode(RED_LED, OUTPUT);
   pinMode(BLUE_LED_UNKNOWN, OUTPUT);
 
+  rgbLedWrite(RGB_ESP32C3_MODULE, 50, 0, 0); 
   digitalWrite(RED_LED, HIGH);
-  digitalWrite(GREEN_LED, HIGH);
+  digitalWrite(GREEN_LED, LOW);
   digitalWrite(BLUE_LED_UNKNOWN, LOW);
 
   WiFi.mode(WIFI_STA);
   WiFi.begin(ssid, password);
+  WiFi.setSleep(false);
   Serial.print("Connecting to WiFi");
   while (WiFi.status() != WL_CONNECTED) {
     delay(500);
@@ -178,23 +234,30 @@ void setup() {
   }
   Serial.println("\nWiFi Connected");
 
+  deviceId = WiFi.macAddress();
+  topicResponse = "skud/dev/" + deviceId + "/response";
+  topicStatus = "skud/dev/" + deviceId + "/status";
+  topicTime = "skud/dev/" + deviceId + "/time";
+
   mqttClient.setServer(mqtt_server, mqtt_port);
   mqttClient.setCallback(mqttCallback);
+  mqttClient.setBufferSize(512); 
+
+  Serial.print("MAC: ");
+  Serial.println(deviceId);
 }
 
 void sendHeartbeat() {
   if (!mqttClient.connected()) return;
   JsonDocument doc;
-  doc["device_name"] = "ESP32_Gate_Main_Lock";
+  doc["device_name"] = deviceId;
+  doc["role"] = DEVICE_ROLE;
   doc["connection"] = "true";
 
   String jsonPayload;
   serializeJson(doc, jsonPayload);
   mqttClient.publish("skud/heartbeat", jsonPayload.c_str());
 }
-
-void IRAM_ATTR onEmergencyTicker()  { triggerEmergencyBlink = true; }
-void IRAM_ATTR onAddingCardTicker() { triggerAddingBlink = true; }
 
 void loop() {
   if (!mqttClient.connected()) {
@@ -208,49 +271,67 @@ void loop() {
   //exit from special modes
   if ((isEmergency != lastEmergencyState && !isEmergency) || 
       (isAddingCard != lastAddingCardState && !isAddingCard)) {
+    rgbLedWrite(RGB_ESP32C3_MODULE, 50, 0, 0); 
     digitalWrite(RED_LED, HIGH);
-    digitalWrite(GREEN_LED, HIGH);
+    digitalWrite(GREEN_LED, LOW);
     digitalWrite(BLUE_LED_UNKNOWN, LOW);
     noTone(buzzerPin);
   }
   lastEmergencyState = isEmergency;
   lastAddingCardState = isAddingCard;
 
-  //ticker manager
-  if (isEmergency) {
-    addingCardTicker.detach();
-    if (!emergencyTicker.active()) emergencyTicker.attach(0.5, onEmergencyTicker);
-  } else if (isAddingCard) {
-    emergencyTicker.detach();
-    if (!addingCardTicker.active()) addingCardTicker.attach(1.0, onAddingCardTicker);
-  } else {
-    emergencyTicker.detach();
-    addingCardTicker.detach();
+  // Режим мигания: ЧС имеет приоритет над добавлением карт
+  int mode = isEmergency ? 1 : (isAddingCard ? 2 : 0);
+  if (mode != currentMode) {
+    currentMode = mode;
+    phaseInit = false; // при входе в режим не действуем на старой фазе, дождёмся первой новой
+    blinkState = false;
   }
 
-  // emergency
-  if (triggerEmergencyBlink) {
-    triggerEmergencyBlink = false;
-    blinkState = !blinkState;
-    digitalWrite(GREEN_LED, HIGH);
-    digitalWrite(RED_LED, blinkState ? LOW : HIGH);
-    digitalWrite(BLUE_LED_UNKNOWN, LOW);
-    tone(buzzerPin, blinkState ? 1500 : 500, 150);
+  if (currentMode != 0) {
+    uint64_t period = (currentMode == 1) ? 500 : 1000;   // ЧС: 0.5 с, добавление карт: 1 с
+    // Деление от абсолютного времени: граница фазы одна и та же на всех синхронизированных
+    // платах, вне зависимости от того, когда каждая из них вошла в режим.
+    uint64_t phase = nowMs() / period;
 
-  // adding card function
-  if (triggerAddingBlink) {
-    triggerAddingBlink = false;
-    blinkState = !blinkState;
-    digitalWrite(GREEN_LED, HIGH);
-    digitalWrite(RED_LED, HIGH);
-    digitalWrite(BLUE_LED_UNKNOWN, blinkState ? HIGH : LOW);
-    if (blinkState) tone(buzzerPin, 1200, 100); 
+    // Действие только при смене фазы. Если loop() задержался, состояние всё равно
+    // вычисляется из времени и остаётся в такт с остальными модулями.
+    if (!phaseInit || phase != lastPhase) {
+      phaseInit = true;
+      lastPhase = phase;
+      blinkState = (phase % 2) == 1;
+
+      if (currentMode == 1) {
+        // emergency
+        rgbLedWrite(RGB_ESP32C3_MODULE, blinkState ? 0 : 50, blinkState ? 50 : 0, 0); 
+        digitalWrite(GREEN_LED, blinkState ? HIGH : LOW);
+        digitalWrite(RED_LED, blinkState ? LOW : HIGH);
+        digitalWrite(BLUE_LED_UNKNOWN, LOW);
+        tone(buzzerPin, blinkState ? 1500 : 500, 150);
+      } else {
+        // adding card function
+        digitalWrite(GREEN_LED, LOW);
+        digitalWrite(RED_LED, HIGH);
+        rgbLedWrite(RGB_ESP32C3_MODULE, 0, 0, blinkState ? 50 : 0); 
+        digitalWrite(BLUE_LED_UNKNOWN, blinkState ? HIGH : LOW);
+        if (blinkState) tone(buzzerPin, 1200, 100); 
+      }
+    }
+  }
+
+  if (triggerRegisteredTone) {
+    triggerRegisteredTone = false;
+    tone(buzzerPin, 2000, 200);
   }
 
   // heartbeat
   if (millis() - timerHeartbeat >= 5000) {
     timerHeartbeat = millis();
+
+    Serial.print("RSSI: ");
+    Serial.println(WiFi.RSSI());
     Serial.print("heartBeat, im alive!");
     sendHeartbeat();
   }
+
 }
