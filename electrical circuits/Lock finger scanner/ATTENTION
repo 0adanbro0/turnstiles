@@ -1,0 +1,2 @@
+be careful with this circuit, you can kill esp32 if will be wrong connection.
+ALSO this scanners need 5V on CVV, but it can work at 3.3v, if you connect CVV with 5V output, so you need a resistance
