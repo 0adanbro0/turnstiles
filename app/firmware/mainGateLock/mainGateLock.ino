@@ -24,6 +24,7 @@ const char* DEVICE_ROLE = "lock";
 #define RED_LED 4
 #define BLUE_LED_UNKNOWN 3
 #define RGB_ESP32C3_MODULE 8
+#define RELE_SIGNAL 5
 
 unsigned long timerHeartbeat = 0;
 unsigned long timerMqttReconnect = 0;
@@ -81,12 +82,14 @@ void handleEffects() {
       rgbLedWrite(RGB_ESP32C3_MODULE, 0, 50, 0); 
       digitalWrite(RED_LED, LOW);
       digitalWrite(GREEN_LED, HIGH);
+      digitalWrite(RELE_SIGNAL, HIGH);
       tone(buzzerPin, 1500);
     }
-    if (millis() - timerLedAction >= 1000) {
+    if (millis() - timerLedAction >= 1500) {
       rgbLedWrite(RGB_ESP32C3_MODULE, 50, 0, 0); 
       digitalWrite(RED_LED, HIGH);
       digitalWrite(GREEN_LED, LOW);
+      digitalWrite(RELE_SIGNAL, LOW);
       noTone(buzzerPin);
       timerLedAction = 0;
       currentAction = IDLE;
@@ -218,8 +221,10 @@ void setup() {
   pinMode(GREEN_LED, OUTPUT);
   pinMode(RED_LED, OUTPUT);
   pinMode(BLUE_LED_UNKNOWN, OUTPUT);
+  pinMode(RELE_SIGNAL, OUTPUT);
 
-  rgbLedWrite(RGB_ESP32C3_MODULE, 50, 0, 0); 
+  rgbLedWrite(RGB_ESP32C3_MODULE, 50, 0, 0);
+  digitalWrite(RELE_SIGNAL, LOW); 
   digitalWrite(RED_LED, HIGH);
   digitalWrite(GREEN_LED, LOW);
   digitalWrite(BLUE_LED_UNKNOWN, LOW);
@@ -275,6 +280,7 @@ void loop() {
     digitalWrite(RED_LED, HIGH);
     digitalWrite(GREEN_LED, LOW);
     digitalWrite(BLUE_LED_UNKNOWN, LOW);
+    digitalWrite(RELE_SIGNAL, LOW);
     noTone(buzzerPin);
   }
   lastEmergencyState = isEmergency;
@@ -306,10 +312,12 @@ void loop() {
         rgbLedWrite(RGB_ESP32C3_MODULE, blinkState ? 0 : 50, blinkState ? 50 : 0, 0); 
         digitalWrite(GREEN_LED, blinkState ? HIGH : LOW);
         digitalWrite(RED_LED, blinkState ? LOW : HIGH);
+        digitalWrite(RELE_SIGNAL, HIGH);
         digitalWrite(BLUE_LED_UNKNOWN, LOW);
         tone(buzzerPin, blinkState ? 1500 : 500, 150);
       } else {
         // adding card function
+        digitalWrite(RELE_SIGNAL, LOW);
         digitalWrite(GREEN_LED, LOW);
         digitalWrite(RED_LED, HIGH);
         rgbLedWrite(RGB_ESP32C3_MODULE, 0, 0, blinkState ? 50 : 0); 

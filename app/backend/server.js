@@ -4,10 +4,12 @@ import cors from 'cors';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
 import { config, isDev } from './config.js';
-import { connectToMongoDB, User, AccessLog, Device } from './database.js';
+import { connectToMongoDB, User, AccessLog, Device, Credential } from './database.js';
 import {
   connectToMQTTClient,
   broadcastSystemStatus,
+  requestFingerprintEnrollment,
+  getEnrollStatus,
   loadDevices,
   reloadDevice,
   getDevicesSnapshot,
@@ -42,7 +44,7 @@ app.use(express.urlencoded({ extended: true, limit: '100kb' }));
 
 const limiter = rateLimit({
   windowMs: 60 * 1000,
-  max: isDev ? 1000 : 100,
+  max: isDev ? 1000 : 1000,
   standardHeaders: true,
   legacyHeaders: false,
   skip: (req) => req.path.startsWith('/health') || req.path.startsWith('/api/connection-to-server'),
@@ -84,18 +86,22 @@ console.log('[MongoDB] Connected successfully');
 await loadDevices(Device, state);
 
 // 1. MQTT Client (передаем ссылку на state)
-global.mqttClient = connectToMQTTClient(config.MQTT_HOST, { User, AccessLog, Device }, state);
+global.mqttClient = connectToMQTTClient(config.MQTT_HOST, { User, AccessLog, Device, Credential }, state);
 
 // 2. Helpers для роутов
-app.locals.broadcastStatus = (emergency, adding) =>
-  broadcastSystemStatus(global.mqttClient, emergency, adding, state.devices);
+// state уже обновлён к моменту вызова (routes.js меняет его до broadcastStatus), поэтому
+// broadcastSystemStatus читает текущие значения прямо из state, аргументы не нужны
+app.locals.broadcastStatus = () => broadcastSystemStatus(global.mqttClient, state);
 // Вызывать из админки после любого изменения устройства (одобрил, сменил targets, удалил)
 app.locals.reloadDevice = (deviceId) => reloadDevice(Device, state, deviceId);
 // Список устройств с online-статусом для админки
 app.locals.getDevices = () => getDevicesSnapshot(state);
+app.locals.requestFingerprintEnrollment = (deviceId, userId) =>
+  requestFingerprintEnrollment(global.mqttClient, state, Credential, deviceId, userId);
+app.locals.getEnrollStatus = (userId) => getEnrollStatus(state, userId);
 
 // 3. РОУТЫ (ПЕРЕДАЕМ state ЯВНО)
-registerRoutes(app, { User, AccessLog, Device }, state);
+registerRoutes(app, { User, AccessLog, Device, Credential }, state);
 
 // 4. Error Handler
 app.use(errorHandler);

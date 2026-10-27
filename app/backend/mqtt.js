@@ -18,21 +18,44 @@ const TOPIC = {
   // Текущее время сервера для синхронизации мигания между платами. Не retained:
   // устаревшая метка времени хуже, чем её отсутствие.
   deviceTime: (deviceId) => `skud/dev/${deviceId}/time`,
+  // Команда "начни регистрацию отпечатка" - от сервера к устройству
+  deviceEnrollCmd: (deviceId) => `skud/dev/${deviceId}/enroll`,
+  // Результат регистрации - от устройства к серверу. Подписка на этот топик идёт через
+  // wildcard (skud/dev/+/enroll-result), поэтому сравнение по точной строке не подходит -
+  // deviceId извлекается из пришедшего топика через ENROLL_RESULT_RE ниже.
+  deviceEnrollResult: (deviceId) => `skud/dev/${deviceId}/enroll-result`,
+  ENROLL_RESULT_WILDCARD: 'skud/dev/+/enroll-result',
+  ENROLL_PROGRESS_WILDCARD: 'skud/dev/+/enroll-progress',
 };
+
+const ENROLL_RESULT_RE = /^skud\/dev\/([^/]+)\/enroll-result$/;
+const PENDING_ENROLL_TTL_MS = 3 * 60 * 1000; // если устройство не ответило за это время - забываем заявку
+const ENROLL_STATUS_TTL_MS = 2 * 60 * 1000;  // сколько держим последний статус для панели, прежде чем забыть
+
+const ENROLL_PROGRESS_RE = /^skud\/dev\/([^/]+)\/enroll-progress$/;
+const EnrollProgressPayload = z.object({ message: z.string().min(1).max(200) });
 
 // deviceId попадает в имя топика, поэтому пускаем только безопасные символы
 // (без '/', '#', '+', которые ломают MQTT-топики)
 const DeviceId = z.string().min(1).max(64).regex(/^[A-Za-z0-9_:\-]+$/);
 
 // --- MQTT Payload Schemas (Защита от битых сообщений от ESP) ---
+const EnrollResultPayload = z.object({
+  ok: z.boolean(),
+  error: z.string().max(200).optional(),
+}).passthrough();
+
 const HeartbeatPayload = z.object({
   device_name: DeviceId,
   role: z.enum(['reader', 'lock']).optional(),
 }).passthrough(); // разрешаем лишние поля (rssi, uptime...)
 
 const CheckPayload = z.object({
-  user_id: z.string().min(1),
+  user_id: z.string().min(1), // значение идентификатора: UID карты ИЛИ ID отпечатка в памяти сенсора
   direction: z.enum(['in', 'out']),
+  // Тип способа подтверждения личности. По умолчанию "card" - старые прошивки считывателей карт
+  // это поле не шлют вовсе и продолжают работать без единой правки.
+  credential_type: z.enum(['card', 'fingerprint']).default('card'),
   // Поле принимаем для совместимости со старой прошивкой, но НЕ доверяем ему:
   // режим добавления карт определяется только серверным state.
   isAddingCardStatus: z.string().optional(),
@@ -106,7 +129,7 @@ export async function reloadDevice(Device, state, deviceId) {
     online: prev?.online ?? false,
   });
   // Одобрили - устройство сразу получает реальный статус, заблокировали - сразу "всё выключено"
-  publishDeviceStatus(global.mqttClient, state.devices.get(deviceId), state.isEmergencyBool, state.isAddingCardBool);
+  publishDeviceStatus(global.mqttClient, state, state.devices.get(deviceId), state.isEmergencyBool);
 }
 
 /** Список устройств для админки (вместо старых StatusCardModuleConnection и т.п.) */
@@ -127,7 +150,7 @@ export function getDevicesSnapshot(state) {
 // =====================================================================
 
 export function connectToMQTTClient(mqttUri, models, state) {
-  const { User, AccessLog, Device } = models;
+  const { User, AccessLog, Device, Credential } = models;
 
   // Синглтон клиента
   if (global.mqttClient) {
@@ -136,6 +159,11 @@ export function connectToMQTTClient(mqttUri, models, state) {
   }
 
   if (!state.devices) state.devices = new Map();
+  // Заявки на регистрацию отпечатка, ждущие ответа от устройства: deviceId -> { userId, fingerprintId, requestedAt }
+  if (!state.pendingEnrollments) state.pendingEnrollments = new Map();
+  // Последний известный статус регистрации на человека - чтобы панель могла показать
+  // "готово"/"ошибка" вместо того, чтобы смотреть в Serial Monitor платы.
+  if (!state.enrollStatus) state.enrollStatus = new Map();
 
   const client = mqtt.connect(mqttUri, {
     clean: true,
@@ -152,21 +180,33 @@ export function connectToMQTTClient(mqttUri, models, state) {
     console.log('[MQTT] Connected to broker');
     client.subscribe(TOPIC.CHECK, { qos: 1 });
     client.subscribe(TOPIC.HEARTBEAT, { qos: 1 });
+    client.subscribe(TOPIC.ENROLL_RESULT_WILDCARD, { qos: 1 });
+    client.subscribe(TOPIC.ENROLL_PROGRESS_WILDCARD, { qos: 1 });
     // Чистим старый общий retained-топик, иначе он навсегда останется на брокере
     client.publish(TOPIC.LEGACY_STATUS, '', { retain: true });
     // Рассылаем текущий статус каждому устройству в его персональный топик (retain=true)
-    broadcastSystemStatus(client, state.isEmergencyBool, state.isAddingCardBool, state.devices);
+    broadcastSystemStatus(client, state);
   });
 
   client.on('error', (err) => console.error('[MQTT] Connection Error:', err.message));
 
-  // Помечаем пропавшие устройства как offline
+  // Помечаем пропавшие устройства как offline + чистим зависшие заявки на регистрацию
   setInterval(() => {
     const now = Date.now();
     for (const dev of state.devices.values()) {
       const online = now - dev.lastSeen <= OFFLINE_AFTER_MS;
       if (dev.online && !online) console.log(`[MQTT] ${dev.deviceId} went offline`);
       dev.online = online;
+    }
+    for (const [deviceId, pending] of state.pendingEnrollments.entries()) {
+      if (now - pending.requestedAt > PENDING_ENROLL_TTL_MS) {
+        console.log(`[MQTT] Enrollment request for ${deviceId} timed out, dropping`);
+        state.pendingEnrollments.delete(deviceId);
+        setEnrollStatus(state, pending.userId, 'error', 'Устройство не ответило вовремя. Попробуйте ещё раз');
+      }
+    }
+    for (const [userId, s] of state.enrollStatus.entries()) {
+      if (now - s.updatedAt > ENROLL_STATUS_TTL_MS) state.enrollStatus.delete(userId);
     }
   }, SWEEP_INTERVAL_MS).unref();
 
@@ -179,6 +219,60 @@ export function connectToMQTTClient(mqttUri, models, state) {
       payload = JSON.parse(message.toString());
     } catch (e) {
       return console.warn('[MQTT] Invalid JSON:', message.toString().slice(0, 50));
+    }
+
+ 
+    const progressMatch = topic.match(ENROLL_PROGRESS_RE);
+    if (progressMatch) {
+      const pending = state.pendingEnrollments.get(progressMatch[1]);
+      if (!pending) return; // pending НЕ удаляем: заявка закрывается только результатом
+      const parsed = EnrollProgressPayload.safeParse(payload);
+      if (!parsed.success) return;
+      setEnrollStatus(state, pending.userId, 'waiting', parsed.data.message, true);
+      return;
+    }
+
+
+    // --- 0. РЕЗУЛЬТАТ РЕГИСТРАЦИИ ОТПЕЧАТКА (топик с wildcard, сравниваем через regex) ---
+    const enrollMatch = topic.match(ENROLL_RESULT_RE);
+    if (enrollMatch) {
+      const deviceId = enrollMatch[1];
+      const pending = state.pendingEnrollments.get(deviceId);
+      state.pendingEnrollments.delete(deviceId); // в любом случае заявка закрыта - успех, провал, не важно
+
+      if (!pending) {
+        console.warn(`[MQTT] Enrollment result from ${deviceId} without a pending request, ignored`);
+        return;
+      }
+
+      const parsed = EnrollResultPayload.safeParse(payload);
+      if (!parsed.success) {
+        console.warn('[MQTT] Invalid enroll result payload:', parsed.error.flatten());
+        setEnrollStatus(state, pending.userId, 'error', 'Устройство прислало некорректный ответ');
+        return;
+      }
+
+      if (!parsed.data.ok) {
+        const message = parsed.data.error || 'Палец не распознан или два скана не совпали';
+        console.log(`[MQTT] Enrollment failed on ${deviceId}: ${message}`);
+        setEnrollStatus(state, pending.userId, 'error', message);
+        return;
+      }
+
+      try {
+        await Credential.create({ user: pending.userId, type: 'fingerprint', value: String(pending.fingerprintId) });
+        console.log(`[MQTT] Fingerprint ${pending.fingerprintId} linked to user ${pending.userId}`);
+        setEnrollStatus(state, pending.userId, 'ok', `Отпечаток №${pending.fingerprintId} сохранён`);
+      } catch (err) {
+        if (err.code === 11000) {
+          console.warn(`[MQTT] Fingerprint ${pending.fingerprintId} was already taken by the time ${deviceId} finished enrolling`);
+          setEnrollStatus(state, pending.userId, 'error', 'Этот номер уже оказался занят другим человеком, попробуйте ещё раз');
+        } else {
+          console.error('[MQTT] Failed to save credential after enrollment:', err.message);
+          setEnrollStatus(state, pending.userId, 'error', 'Палец записан на сенсор, но не удалось сохранить на сервере');
+        }
+      }
+      return;
     }
 
     // --- 1. HEARTBEAT (он же авто-регистрация) ---
@@ -202,7 +296,7 @@ export function connectToMQTTClient(mqttUri, models, state) {
             { upsert: true }
           );
           console.log(`[MQTT] New device waiting for approval: ${device_name}`);
-          publishDeviceStatus(client, dev, state.isEmergencyBool, state.isAddingCardBool);
+          publishDeviceStatus(client, state, dev, state.isEmergencyBool);
         } catch (err) {
           console.error('[MQTT] Failed to save new device:', err.message);
         }
@@ -220,7 +314,7 @@ export function connectToMQTTClient(mqttUri, models, state) {
 
       if (wasOffline) {
         console.log(`[MQTT] ${device_name} is online (${dev.status})`);
-        publishDeviceStatus(client, dev, state.isEmergencyBool, state.isAddingCardBool);
+        publishDeviceStatus(client, state, dev, state.isEmergencyBool);
       }
       // Каждый heartbeat (~раз в 5 с) обновляем плате текущее время сервера,
       // чтобы синхронное мигание не расходилось из-за дрейфа millis()
@@ -236,7 +330,7 @@ export function connectToMQTTClient(mqttUri, models, state) {
         return;
       }
 
-      const { user_id, direction, nameEspReader } = parsed.data;
+      const { user_id, direction, credential_type, nameEspReader } = parsed.data;
 
       // Сканы принимаем только от одобренных считывателей
       const reader = state.devices.get(nameEspReader);
@@ -244,13 +338,14 @@ export function connectToMQTTClient(mqttUri, models, state) {
         return console.warn(`[MQTT] Scan from unknown/unapproved reader ignored: ${nameEspReader}`);
       }
 
-      const userIdStr = String(user_id);
-      console.log(`USER - ${userIdStr} @ ${nameEspReader}`);
+      const scannedValue = String(user_id); // то, что реально пришло с датчика: UID карты или ID отпечатка
+      console.log(`SCAN - ${credential_type}:${scannedValue} @ ${nameEspReader}`);
       const isEntering = direction === 'in';
       console.log(`Entering - ${isEntering ? 'In' : 'Out'}`);
 
-      // Anti-bounce / Duplicate protection (ключ учитывает считыватель)
-      const dedupeKey = `${nameEspReader}:${userIdStr}`;
+      // Anti-bounce / Duplicate protection (ключ учитывает считыватель и тип способа входа:
+      // одинаковые по написанию UID карты и ID отпечатка не должны схлопываться в один дедуп)
+      const dedupeKey = `${nameEspReader}:${credential_type}:${scannedValue}`;
       if (processingCards.has(dedupeKey)) {
         return console.log(`[MQTT] Duplicate ignored for ${dedupeKey}`);
       }
@@ -259,16 +354,16 @@ export function connectToMQTTClient(mqttUri, models, state) {
       try {
         // --- BUSINESS LOGIC ---
         const decision = await processAccessLogic({
-          userIdStr, isEntering, readerId: nameEspReader,
-          state, User, AccessLog,
+          scannedValue, credentialType: credential_type, isEntering, readerId: nameEspReader,
+          state, User, AccessLog, Credential,
         });
 
-        routeDecision(client, state, reader, decision, userIdStr);
+        routeDecision(client, state, reader, decision, scannedValue);
 
       } catch (err) {
         console.error('[MQTT] Processing Error:', err);
         // Ошибка уходит только считывателю, замки не трогаем
-        publishToDevice(client, reader.deviceId, buildPayload(MQTT_RESPONSE.ERROR, userIdStr, reader.deviceId));
+        publishToDevice(client, reader.deviceId, buildPayload(MQTT_RESPONSE.ERROR, scannedValue, reader.deviceId));
       } finally {
         setTimeout(() => processingCards.delete(dedupeKey), PROCESSING_TTL_MS);
       }
@@ -278,23 +373,50 @@ export function connectToMQTTClient(mqttUri, models, state) {
   return client;
 }
 
+
+
+/**
+ * Находит пользователя по отсканированному значению.
+ *
+ * "card" - как и раньше, напрямую по User.user_id (основная карта). Это сохраняет 100%
+ * совместимость со старой прошивкой считывателей карт: ни формат, ни поведение не изменились.
+ *
+ * Любой другой тип ("fingerprint" и далее) - через коллекцию Credential, которая связывает
+ * произвольный идентификатор (например, ID отпечатка в памяти сенсора) с уже существующим
+ * пользователем. Привязка делается один раз через админку (POST /api/users/:id/credentials),
+ * а не автоматически через режим добавления карт - у "голого" скана отпечатка нет имени,
+ * которое можно было бы присвоить новому пользователю, поэтому для отпечатка всегда нужен
+ * заранее существующий пользователь.
+ */
+async function resolveUser(credentialType, value, User, Credential) {
+  if (credentialType === 'card') {
+    return User.findOne({ user_id: value }).lean();
+  }
+  const cred = await Credential.findOne({ type: credentialType, value }).lean();
+  if (!cred) return null;
+  return User.findOne({ _id: cred.user }).lean();
+}
+
 /**
  * Ядро логики доступа.
  */
-async function processAccessLogic({ userIdStr, isEntering, readerId, state, User, AccessLog }) {
+async function processAccessLogic({ scannedValue, credentialType, isEntering, readerId, state, User, AccessLog, Credential }) {
   const now = new Date();
 
   // Режим добавления карт определяется ТОЛЬКО сервером.
   // Если задан state.addingCardReaderId, карты регистрирует только эта считывающая ESP.
+  // Работает только для credentialType === 'card': создать нового пользователя по "голому"
+  // отпечатку нельзя (см. комментарий к resolveUser), для отпечатка нужна привязка через админку.
   const addingCardMode =
+    credentialType === 'card' &&
     Boolean(state.isAddingCardBool) &&
     (!state.addingCardReaderId || state.addingCardReaderId === readerId);
 
   // 1. РЕЖИМ ДОБАВЛЕНИЯ КАРТ
   if (addingCardMode) {
-    const exists = await User.findOne({ user_id: userIdStr }).lean();
+    const exists = await User.findOne({ user_id: scannedValue }).lean();
     if (!exists) {
-      await User.create({ user_id: userIdStr, name: `Card ${userIdStr.slice(-4)}` });
+      await User.create({ user_id: scannedValue, name: `Card ${scannedValue.slice(-4)}` });
       return MQTT_RESPONSE.REGISTERED;
     }
     return MQTT_RESPONSE.ALREADY_REGISTERED;
@@ -302,29 +424,36 @@ async function processAccessLogic({ userIdStr, isEntering, readerId, state, User
 
   // 2. ЧРЕЗВЫЧАЙНАЯ СИТУАЦИЯ
   if (state.isEmergencyBool) {
-    await AccessLog.create({ user_id: userIdStr, isEntry: isEntering, access: true, reason: 'EMERGENCY', timestamp: now });
+    await AccessLog.create({ user_id: scannedValue, isEntry: isEntering, access: true, reason: 'EMERGENCY', timestamp: now, credentialType });
     // В ЧС счетчик не меняем или меняем? Обычно в ЧС двери открыты для всех, счетчик не важен.
     // Если нужно менять: state.counterCurrentUsersNow += isEntering ? 1 : -1;
     return MQTT_RESPONSE.EMERGENCY;
   }
 
   // 3. ПОЛЬЗОВАТЕЛЬ
-  const user = await User.findOne({ user_id: userIdStr }).lean();
+  const user = await resolveUser(credentialType, scannedValue, User, Credential);
   if (!user) {
     console.log("DENIED_UNKNOWN");
-    await AccessLog.create({ user_id: userIdStr, isEntry: isEntering, access: false, reason: 'DENIED_UNKNOWN', timestamp: now });
+    await AccessLog.create({ user_id: scannedValue, isEntry: isEntering, access: false, reason: 'DENIED_UNKNOWN', timestamp: now, credentialType });
     return MQTT_RESPONSE.DENIED_UNKNOWN;
   }
+
+  // Канонический идентификатор человека - его основная карта (User.user_id), а не то, чем он
+  // в этот раз отсканировался. Это критично: если один и тот же человек входит картой, а
+  // выходит отпечатком, антипассбэк и счётчик должны видеть ОДНОГО человека, а не двух разных
+  // "user_id" в журнале. С единственным способом входа (только карта) это ничего не меняет -
+  // canonicalId всегда совпадает с тем, что сканировалось.
+  const canonicalId = user.user_id;
 
   // 4. ЛИМИТ МЕСТ (Только на вход)
   if (isEntering && state.isLimitWorking && state.counterCurrentUsersNow >= state.usersLimit) {
     console.log("DENIED_LIMIT");
-    await AccessLog.create({ user_id: userIdStr, isEntry: true, access: false, reason: 'DENIED_LIMIT', timestamp: now });
+    await AccessLog.create({ user_id: canonicalId, isEntry: true, access: false, reason: 'DENIED_LIMIT', timestamp: now, credentialType });
     return MQTT_RESPONSE.DENIED_LIMIT;
   }
 
-  // 5. АНТИПАССБЭК (Последний УСПЕШНЫЙ лог)
-  const lastLog = await AccessLog.findOne({ user_id: userIdStr, access: true }).sort({ timestamp: -1 }).lean();
+  // 5. АНТИПАССБЭК (Последний УСПЕШНЫЙ лог, по каноническому id - не зависит от способа входа)
+  const lastLog = await AccessLog.findOne({ user_id: canonicalId, access: true }).sort({ timestamp: -1 }).lean();
 
   if (lastLog) {
     if (isEntering && lastLog.isEntry) return MQTT_RESPONSE.DENIED_INSIDE;       // Уже внутри
@@ -338,7 +467,7 @@ async function processAccessLogic({ userIdStr, isEntering, readerId, state, User
   if (!isWorkShiftStarted(user.startWorkDay, user.endWorkDay, now)) {
     console.log(`Denied shift`);
     await AccessLog.create({ 
-      user_id: userIdStr, 
+      user_id: canonicalId, 
       isEntry: isEntering, 
       access: false, 
       reason: 'DENIED_SHIFT', 
@@ -355,11 +484,12 @@ async function processAccessLogic({ userIdStr, isEntering, readerId, state, User
 
   // Запись лога УСПЕХА
   await AccessLog.create({
-    user_id: userIdStr,
+    user_id: canonicalId,
     isEntry: isEntering,
     access: true,
     reason: 'ALLOWED',
     timestamp: now,
+    credentialType,
   });
 
   console.log(new Date().getTime());
@@ -370,12 +500,12 @@ async function processAccessLogic({ userIdStr, isEntering, readerId, state, User
     const durationMs = now.getTime() - entryTime;
     if (durationMs > 0 && durationMs < 24 * 60 * 60 * 1000) { // Защита от багов времени (>24h)
       await User.updateOne(
-        { user_id: userIdStr },
+        { user_id: canonicalId },
         { $inc: { totalWorkMs: durationMs } }
       );
 
-      const totalWorkMsDoc = await User.findOne({ user_id: userIdStr }, { totalWorkMs: 1 }).lean();
-      console.log(`Updated totalWorkMs for ${userIdStr}: ${totalWorkMsDoc.totalWorkMs} ms`);
+      const totalWorkMsDoc = await User.findOne({ user_id: canonicalId }, { totalWorkMs: 1 }).lean();
+      console.log(`Updated totalWorkMs for ${canonicalId}: ${totalWorkMsDoc.totalWorkMs} ms`);
     }
   }
 
@@ -429,16 +559,37 @@ function routeDecision(client, state, reader, decision, userId) {
 }
 
 /**
+ * Должно ли КОНКРЕТНОЕ устройство видеть режим добавления карт/отпечатков.
+ *
+ * Если addingCardReaderId не задан (выбрано "любой одобренный" в панели) - видят все одобренные
+ * устройства, как и раньше.
+ *
+ * Если задан конкретный считыватель - видят только он сам и замки из его targets. Остальные
+ * считыватели и замки продолжают работать как обычно: через них по-прежнему можно пройти,
+ * пока идёт регистрация на другом считывателе - это и есть смысл выбора конкретного устройства
+ * в панели, а не просто индикация "для галочки".
+ */
+function deviceSeesAddingCard(state, dev) {
+  if (!state.isAddingCardBool) return false;
+  if (!state.addingCardReaderId) return true; // "любой одобренный"
+  if (dev.deviceId === state.addingCardReaderId) return true;
+  const reader = state.devices.get(state.addingCardReaderId);
+  return Boolean(reader && reader.targets.includes(dev.deviceId));
+}
+
+/**
  * Статус одному устройству (retain=true, чтобы получить его сразу после подписки).
  * Неодобренные и заблокированные устройства всегда видят "всё выключено":
- * ЧС и режим добавления карт их не касаются.
+ * ЧС и режим добавления карт их не касаются. Режим добавления карт дополнительно сужается
+ * до конкретного считывателя и его замков через deviceSeesAddingCard (см. выше) - ЧС остаётся
+ * общим для всех, это не затронуто.
  */
-function publishDeviceStatus(client, dev, isEmergency, isAddingCard) {
+function publishDeviceStatus(client, state, dev, isEmergency) {
   if (!client?.connected || !dev) return;
   const approved = dev.status === 'approved';
   client.publish(TOPIC.deviceStatus(dev.deviceId), JSON.stringify({
     isEmergency: approved && Boolean(isEmergency),
-    isAddingCard: approved && Boolean(isAddingCard),
+    isAddingCard: approved && deviceSeesAddingCard(state, dev),
   }), { qos: 1, retain: true });
 }
 
@@ -448,11 +599,65 @@ function clearDeviceStatus(client, deviceId) {
 }
 
 /** Рассылка статуса системы (ЧС, режим карт) всем известным устройствам */
-export function broadcastSystemStatus(client, isEmergency, isAddingCard, devices) {
-  if (!client?.connected || !devices) return;
+export function broadcastSystemStatus(client, state) {
+  if (!client?.connected || !state.devices) return;
 
-  for (const dev of devices.values()) {
-    publishDeviceStatus(client, dev, isEmergency, isAddingCard);
+  for (const dev of state.devices.values()) {
+    publishDeviceStatus(client, state, dev, state.isEmergencyBool);
   }
-  console.log(`[MQTT] Broadcast Status: Emergency=${isEmergency}, AddingCard=${isAddingCard}`);
+  console.log(`[MQTT] Broadcast Status: Emergency=${state.isEmergencyBool}, AddingCard=${state.isAddingCardBool}, scopedTo=${state.addingCardReaderId || 'все одобренные'}`);
+}
+
+/** Записывает последний известный статус регистрации для конкретного пользователя (для панели) */
+function setEnrollStatus(state, userId, status, message, isProgress = false) {
+  const key = String(userId);
+  const prev = state.enrollStatus.get(key);
+  const progress = [...(prev?.progress ?? [])];
+  if (isProgress) progress.push(message);
+  state.enrollStatus.set(key, { status, message, progress, updatedAt: Date.now() });
+}
+
+/** Читает статус регистрации для панели. Возвращает 'idle', если сессии не было или она устарела. */
+export function getEnrollStatus(state, userId) {
+  const s = state.enrollStatus.get(String(userId));
+  if (!s) return { status: 'idle', progress: [] };
+  return { status: s.status, message: s.message, progress: s.progress };
+}
+
+/**
+ * Запускает регистрацию отпечатка на устройстве полностью по MQTT - никакого провода,
+ * никакого ключа администратора на самой плате. Вызывается из роута панели администратора.
+ *
+ * Возвращает { ok: true, fingerprintId } при успешной отправке команды, или
+ * { ok: false, error } если устройство не годится для регистрации прямо сейчас
+ * (не найдено, не одобрено, не online, уже идёт другая регистрация на этом устройстве).
+ */
+export async function requestFingerprintEnrollment(client, state, Credential, deviceId, userId) {
+  const dev = state.devices.get(deviceId);
+  if (!dev || dev.status !== 'approved' || dev.role !== 'reader') {
+    return { ok: false, error: 'Устройство не найдено или не одобрено' };
+  }
+  if (!dev.online) {
+    return { ok: false, error: 'Устройство сейчас не на связи' };
+  }
+  if (state.pendingEnrollments.has(deviceId)) {
+    return { ok: false, error: 'На этом устройстве уже идёт другая регистрация' };
+  }
+  if (!client?.connected) {
+    return { ok: false, error: 'Нет связи с MQTT-брокером' };
+  }
+
+  const used = await Credential.find({ type: 'fingerprint' }, { value: 1 }).lean();
+  const fingerprintId = used.reduce((m, c) => {
+    const n = Number(c.value);
+    return Number.isInteger(n) && n > m ? n : m;
+  }, 0) + 1;
+
+  state.pendingEnrollments.set(deviceId, { userId, fingerprintId, requestedAt: Date.now() });
+  state.enrollStatus.delete(String(userId));
+  setEnrollStatus(state, userId, 'waiting', `Ожидаем сканирование на устройстве (номер ${fingerprintId})`);
+  client.publish(TOPIC.deviceEnrollCmd(deviceId), JSON.stringify({ fingerprintId }), { qos: 1 });
+  console.log(`[MQTT] Enrollment requested on ${deviceId}: fingerprintId=${fingerprintId}, user=${userId}`);
+
+  return { ok: true, fingerprintId };
 }

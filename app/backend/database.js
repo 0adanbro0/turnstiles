@@ -16,6 +16,10 @@ const LogSchema = new mongoose.Schema({
   timestamp: { type: Date, default: Date.now, index: -1 },
   access: { type: Boolean, default: false },
   reason: { type: String, default: '' }, // Для аудита: 'ALLOWED', 'DENIED_LIMIT', 'EMERGENCY'...
+  // Способ, которым прошло именно это сканирование (не привязка к пользователю, а к событию -
+  // один и тот же человек может входить картой и выходить отпечатком). default 'card' - у старых
+  // записей, созданных до появления отпечатков, не было этого поля, и это было единственным способом.
+  credentialType: { type: String, enum: ['card', 'fingerprint'], default: 'card' },
 }, { versionKey: false });
 
 // Составной индекс для быстрого поиска "последний успешный вход"
@@ -30,9 +34,22 @@ const DeviceSchema = new mongoose.Schema({
   targets: { type: [String], default: [] },                 // для reader: deviceId замков, которые он открывает
 }, { versionKey: false, timestamps: true });
 
+// Дополнительные способы подтвердить личность (отпечаток и т.п.), привязанные к пользователю.
+// User.user_id остаётся основной картой (ничего в старом потоке не меняется); Credential - это
+// ДОПОЛНИТЕЛЬНЫЕ идентификаторы поверх неё, каждый своего типа.
+const CredentialSchema = new mongoose.Schema({
+  user: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
+  type: { type: String, enum: ['card', 'fingerprint'], required: true }, // новый тип добавляется сюда без переделки остального
+  value: { type: String, required: true, trim: true, maxlength: 128 }, // например, ID отпечатка в памяти сенсора
+}, { versionKey: false, timestamps: true });
+
+// Один и тот же (тип, значение) не может быть привязан дважды - ни к тому же, ни к другому пользователю
+CredentialSchema.index({ type: 1, value: 1 }, { unique: true });
+
 export const User = mongoose.model('User', UserSchema);
 export const AccessLog = mongoose.model('AccessLog', LogSchema);
 export const Device = mongoose.model('Device', DeviceSchema);
+export const Credential = mongoose.model('Credential', CredentialSchema);
 
 export async function connectToMongoDB(uri) {
   // Настройки пула соединений для продакшена
@@ -47,5 +64,6 @@ export async function connectToMongoDB(uri) {
     await User.syncIndexes();
     await AccessLog.syncIndexes();
     await Device.syncIndexes();
+    await Credential.syncIndexes();
   }
 }

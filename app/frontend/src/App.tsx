@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
 import './app.css';
 
@@ -24,7 +24,15 @@ interface UserRow {
   startWorkDay: number;
   endWorkDay: number;
   totalWorkMs: number;
+  hasFingerprint: boolean;
 }
+interface CredentialRow {
+  _id: string;
+  type: 'fingerprint';
+  value: string;
+  createdAt: string;
+}
+type CredentialType = 'card' | 'fingerprint';
 interface LogRow {
   _id: string;
   user_id: string;
@@ -32,6 +40,7 @@ interface LogRow {
   access: boolean;
   reason: string;
   timestamp: string;
+  credentialType: CredentialType;
 }
 interface Paged<T> {
   data: T[];
@@ -72,6 +81,7 @@ const STATUS_LABEL: Record<DeviceStatus, string> = {
   blocked: 'Заблокировано',
 };
 const ROLE_LABEL: Record<Role, string> = { reader: 'Считыватель', lock: 'Замок' };
+const CREDENTIAL_TYPE_LABEL: Record<CredentialType, string> = { card: 'Карта', fingerprint: 'Отпечаток' };
 const REASON_LABEL: Record<string, string> = {
   ALLOWED: 'Проход разрешён',
   EMERGENCY: 'Открыто в режиме ЧС',
@@ -146,20 +156,27 @@ function usePolling(load: () => Promise<void>, ms: number) {
   }, [load, ms]);
 }
 
-// Постраничный список с живым обновлением (журнал, пользователи)
+// Постраничный список с живым обновлением (журнал, пользователи).
+// filterQuery - готовая строка вида "key=value" для доп. фильтра из <select> (без debounce,
+// выбор в селекте - уже осознанное единичное действие, в отличие от набора текста).
 function usePagedList<T>(call: Call, notify: Notify, path: string) {
   const [page, setPage] = useState(1);
   const [queryText, setQueryText] = useState('');    // то, что видно в поле ввода
   const [search, setSearch] = useState('');           // то, что реально ушло в запрос (с задержкой)
+  const [filterQuery, setFilterQuery] = useState(''); // доп. фильтр из select, напр. "credentialType=card"
   const [list, setList] = useState<Paged<T> | null>(null);
   const pageRef = useRef(page);
   const searchRef = useRef(search);
+  const filterRef = useRef(filterQuery);
   useEffect(() => {
     pageRef.current = page;
   }, [page]);
   useEffect(() => {
     searchRef.current = search;
   }, [search]);
+  useEffect(() => {
+    filterRef.current = filterQuery;
+  }, [filterQuery]);
 
   // Debounce: не долбим сервер на каждое нажатие клавиши
   useEffect(() => {
@@ -170,26 +187,34 @@ function usePagedList<T>(call: Call, notify: Notify, path: string) {
     return () => window.clearTimeout(id);
   }, [queryText]);
 
+  // Смена select-фильтра - сразу, без задержки, но тоже возвращает на первую страницу
+  useEffect(() => {
+    const timer = setTimeout(() => setPage(1), 0);
+    return () => clearTimeout(timer);
+  }, [filterQuery]);
+
+
   const load = useCallback(
     async (silent = false) => {
       try {
         const q = search ? `&search=${encodeURIComponent(search)}` : '';
-        const res = await call<Paged<T>>(`${path}?page=${page}&limit=${PAGE_SIZE}${q}`);
-        // Пока ждали ответ, страница или поисковый запрос уже сменились - результат устарел
-        if (pageRef.current !== page || searchRef.current !== search) return;
+        const f = filterQuery ? `&${filterQuery}` : '';
+        const res = await call<Paged<T>>(`${path}?page=${page}&limit=${PAGE_SIZE}${q}${f}`);
+        // Пока ждали ответ, страница/поиск/фильтр уже сменились - результат устарел
+        if (pageRef.current !== page || searchRef.current !== search || filterRef.current !== filterQuery) return;
         if (res.data.length === 0 && page > 1) setPage(page - 1);
         else setList(res);
       } catch (e) {
         if (!silent) notify(errorText(e), true); // при фоновом опросе ошибки не показываем, статус связи виден в верхней полосе
       }
     },
-    [call, notify, page, path, search],
+    [call, notify, page, path, search, filterQuery],
   );
 
   const poll = useCallback(() => load(true), [load]);
   usePolling(poll, LIVE_MS);
 
-  return { list, page, setPage, load, queryText, setQueryText };
+  return { list, page, setPage, load, queryText, setQueryText, filterQuery, setFilterQuery };
 }
 
 const formatWork = (ms: number) => `${Math.floor(ms / 3_600_000)} ч ${Math.floor((ms % 3_600_000) / 60_000)} мин`;
@@ -358,7 +383,7 @@ function Panel({ adminKey, onLogout }: { adminKey: string; onLogout: () => void 
             <ControlTab status={status} devices={devices} call={call} run={run} notify={notify} onAddingReader={setAddingReader} />
           )}
           {tab === 'devices' && <DevicesTab devices={devices} call={call} run={run} />}
-          {tab === 'users' && <UsersTab call={call} run={run} notify={notify} />}
+          {tab === 'users' && <UsersTab call={call} run={run} notify={notify} devices={devices} />}
           {tab === 'logs' && <LogsTab call={call} run={run} notify={notify} />}
         </main>
       </div>
@@ -631,10 +656,11 @@ function DeviceRow(props: {
 }
 
 // ---------- Пользователи ----------
-function UsersTab({ call, run, notify }: { call: Call; run: Run; notify: Notify }) {
-  const { list, page, setPage, load, queryText, setQueryText } = usePagedList<UserRow>(call, notify, '/api/users');
+function UsersTab({ call, run, notify, devices }: { call: Call; run: Run; notify: Notify; devices: Device[] }) {
+  const { list, page, setPage, load, queryText, setQueryText, filterQuery, setFilterQuery } = usePagedList<UserRow>(call, notify, '/api/users');
   const [form, setForm] = useState({ user_id: '', name: '', accessLevel: 'firstLevel', startWorkDay: '6', endWorkDay: '18' });
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [credsFor, setCredsFor] = useState<string | null>(null); // чья панель отпечатков раскрыта
 
   const set = (field: keyof typeof form) => (e: { target: { value: string } }) => setForm({ ...form, [field]: e.target.value });
 
@@ -685,12 +711,23 @@ function UsersTab({ call, run, notify }: { call: Call; run: Run; notify: Notify 
         </form>
       </section>
 
+
       <section className="block">
-        <label className="field search-field">
-          <span>Поиск по имени, номеру карты или уровню доступа</span>
-          <input value={queryText} onChange={(e) => setQueryText(e.target.value)} placeholder="Например, Иванов или firstLevel" />
-        </label>
-        <div className="table-wrap">
+        <div className="fields">
+          <label className="field search-field">
+            <span>Поиск по имени, номеру карты или уровню доступа</span>
+            <input value={queryText} onChange={(e) => setQueryText(e.target.value)} placeholder="Например, Иванов или firstLevel" />
+          </label>
+          <label className="field">
+            <span>Отпечаток пальца</span>
+            <select value={filterQuery} onChange={(e) => setFilterQuery(e.target.value)}>
+              <option value="">Все</option>
+              <option value="hasFingerprint=yes">Есть отпечаток</option>
+              <option value="hasFingerprint=no">Нет отпечатка</option>
+            </select>
+          </label>
+        </div>
+        <div className="table-wrap x">
           <table>
             <thead>
               <tr>
@@ -699,41 +736,48 @@ function UsersTab({ call, run, notify }: { call: Call; run: Run; notify: Notify 
                 <th scope="col">Уровень</th>
                 <th scope="col">Смена</th>
                 <th scope="col">Отработано</th>
+                <th scope="col">Отпечаток</th>
                 <th scope="col"><span className="visually-hidden">Действия</span></th>
               </tr>
             </thead>
             <tbody>
-              {list?.data.map((u) =>
-                editingId === u._id ? (
-                  <UserEditRow
-                    key={u._id}
-                    user={u}
-                    save={(patch) => {
-                      setEditingId(null);
-                      after(run(() => call(`/api/users/${u._id}`, 'PATCH', patch), 'Пользователь сохранён'));
-                    }}
-                    cancel={() => setEditingId(null)}
-                  />
-                ) : (
-                  <tr key={u._id}>
-                    <td>{u.name || 'Без имени'}</td>
-                    <td>{u.user_id}</td>
-                    <td>{u.accessLevel}</td>
-                    <td>{u.startWorkDay}:00 до {u.endWorkDay}:00</td>
-                    <td>{formatWork(u.totalWorkMs)}</td>
-                    <td className="row-actions">
-                      <button className="btn btn-small" onClick={() => setEditingId(u._id)}>Изменить</button>
-                      <button className="btn btn-small" onClick={() => after(run(() => call('/api/users/reset-time', 'POST', { user_id: u.user_id }), 'Время сброшено'))}>Сбросить время</button>
-                      <button
-                        className="btn btn-small btn-danger"
-                        onClick={() => window.confirm(`Удалить пользователя ${u.name || u.user_id}?`) && after(run(() => call(`/api/users/${u._id}`, 'DELETE'), 'Пользователь удалён'))}
-                      >
-                        Удалить
-                      </button>
-                    </td>
-                  </tr>
-                ),
-              )}
+              {list?.data.map((u) => (
+                <Fragment key={u._id}>
+                  {editingId === u._id ? (
+                    <UserEditRow
+                      user={u}
+                      save={(patch) => {
+                        setEditingId(null);
+                        after(run(() => call(`/api/users/${u._id}`, 'PATCH', patch), 'Пользователь сохранён'));
+                      }}
+                      cancel={() => setEditingId(null)}
+                    />
+                  ) : (
+                    <tr>
+                      <td>{u.name || 'Без имени'}</td>
+                      <td>{u.user_id}</td>
+                      <td>{u.accessLevel}</td>
+                      <td>{u.startWorkDay}:00 до {u.endWorkDay}:00</td>
+                      <td>{formatWork(u.totalWorkMs)}</td>
+                      <td><span className={`pill ${u.hasFingerprint ? 'pill-approved' : ''}`}>{u.hasFingerprint ? 'Есть' : 'Нет'}</span></td>
+                      <td className="row-actions">
+                        <button className="btn btn-small" onClick={() => setEditingId(u._id)}>Изменить</button>
+                        <button className="btn btn-small" aria-expanded={credsFor === u._id} onClick={() => setCredsFor(credsFor === u._id ? null : u._id)}>
+                          Отпечатки
+                        </button>
+                        <button className="btn btn-small" onClick={() => after(run(() => call('/api/users/reset-time', 'POST', { user_id: u.user_id }), 'Время сброшено'))}>Сбросить время</button>
+                        <button
+                          className="btn btn-small btn-danger"
+                          onClick={() => window.confirm(`Удалить пользователя ${u.name || u.user_id}?`) && after(run(() => call(`/api/users/${u._id}`, 'DELETE'), 'Пользователь удалён'))}
+                        >
+                          Удалить
+                        </button>
+                      </td>
+                    </tr>
+                  )}
+                  {credsFor === u._id && <CredentialsRow userId={u._id} call={call} notify={notify} devices={devices} />}
+                </Fragment>
+              ))}
             </tbody>
           </table>
         </div>
@@ -764,7 +808,7 @@ function UserEditRow({ user, save, cancel }: { user: UserRow; save: (patch: Part
 
   return (
     <tr className="edit-row">
-      <td colSpan={6}>
+      <td colSpan={7}>
         <form className="fields" onSubmit={submit}>
           <label className="field"><span>Имя</span><input value={name} maxLength={100} autoFocus onChange={(e) => setName(e.target.value)} /></label>
           <label className="field"><span>Уровень доступа</span><input value={accessLevel} maxLength={50} onChange={(e) => setAccessLevel(e.target.value)} /></label>
@@ -780,9 +824,143 @@ function UserEditRow({ user, save, cancel }: { user: UserRow; save: (patch: Part
   );
 }
 
+// Разворачиваемая строка с отпечатками, привязанными к пользователю. Сама регистрация пальца на
+// сенсоре делается отдельным служебным скетчем (fingerprint_enroll.ino) - здесь только привязка
+// уже существующего числового ID к конкретному человеку.
+function CredentialsRow({ userId, call, notify, devices }: { userId: string; call: Call; notify: Notify; devices: Device[] }) {
+  const [list, setList] = useState<CredentialRow[] | null>(null);
+  const [deviceId, setDeviceId] = useState('');
+  const [starting, setStarting] = useState(false);
+  // Пока ждём физическое прикладывание пальца - опрашиваем статус чаще, чтобы увидеть
+  // результат (готово или ошибка с причиной) прямо в панели, без Serial Monitor
+  const [waiting, setWaiting] = useState(false);
+  const [lastError, setLastError] = useState('');
+
+  const readers = devices.filter((d) => d.role === 'reader' && d.status === 'approved');
+
+  const load = useCallback(async () => {
+    try {
+      setList(await call<CredentialRow[]>(`/api/users/${userId}/credentials`));
+    } catch (e) {
+      notify(errorText(e), true);
+    }
+  }, [call, userId, notify]);
+  useEffect(() => {
+    let ignore = false;
+
+    const startLoading = async () => {
+      // Если нужно вызвать load, но избежать синхронного тика в теле эффекта:
+      await Promise.resolve(); // Сдвигает выполнение load в микротаску
+      if (!ignore) {
+        void load(); 
+      }
+    };
+
+    startLoading();
+
+    return () => {
+      ignore = true; // Защита от race conditions
+    };
+  }, [load]);
+
+  const shownRef = useRef(0); // сколько шагов прогресса уже показано
+  const checkStatus = useCallback(async () => {
+    if (!waiting) return; // в простое статус не опрашиваем, иначе старый 'ok' всплывёт повторно
+    try {
+      const s = await call<{ status: 'idle' | 'waiting' | 'ok' | 'error'; message?: string; progress?: string[] }>(
+        `/api/users/${userId}/credentials/fingerprint/status`,
+      );
+      const progress = s.progress ?? [];
+      if (progress.length > shownRef.current) {
+        shownRef.current = progress.length;
+        if (s.status === 'waiting') notify(progress[progress.length - 1]);
+      }
+      if (s.status === 'ok') {
+        setWaiting(false);
+        setLastError('');
+        notify(s.message || 'Отпечаток сохранён');
+        void load();
+      } else if (s.status === 'error') {
+        setWaiting(false);
+        setLastError(s.message || 'Регистрация не удалась');
+        notify(s.message || 'Регистрация не удалась', true);
+      }
+    } catch (e) {
+      notify(errorText(e), true);
+    }
+  }, [call, userId, load, notify, waiting]);
+  usePolling(checkStatus, waiting ? 1500 : 60000); // быстро, пока реально ждём палец; редко в остальное время
+
+  const start = async () => {
+    if (!deviceId) return;
+    setStarting(true);
+    setLastError('');
+    shownRef.current = 0;
+    try {
+      const res = await call<{ started: boolean; fingerprintId: number }>(`/api/users/${userId}/credentials/fingerprint/start`, 'POST', { deviceId });
+      notify(`Приложите палец к устройству «${readers.find((r) => r.deviceId === deviceId)?.name || deviceId}» — номер ${res.fingerprintId}`);
+      setWaiting(true);
+    } catch (e) {
+      notify(errorText(e), true);
+    } finally {
+      setStarting(false);
+    }
+  };
+
+  const remove = async (credId: string) => {
+    try {
+      await call(`/api/users/${userId}/credentials/${credId}`, 'DELETE');
+      void load();
+    } catch (e) {
+      notify(errorText(e), true);
+    }
+  };
+
+  return (
+    <tr className="edit-row">
+      <td colSpan={7}>
+        {list && list.length > 0 && (
+          <ul className="cred-list">
+            {list.map((c) => (
+              <li key={c._id}>
+                Отпечаток №{c.value}
+                <button className="btn btn-small btn-danger" onClick={() => remove(c._id)}>Отвязать</button>
+              </li>
+            ))}
+          </ul>
+        )}
+        {list && list.length === 0 && <p className="hint">Отпечатков пока не привязано.</p>}
+
+        {readers.length === 0 ? (
+          <p className="hint">Нет ни одного одобренного считывателя отпечатков — сначала добавьте и одобрите устройство во вкладке «Устройства».</p>
+        ) : (
+          <div className="fields">
+            <label className="field">
+              <span>Устройство для регистрации</span>
+              <select value={deviceId} onChange={(e) => setDeviceId(e.target.value)} disabled={waiting}>
+                <option value="">Выберите считыватель</option>
+                {readers.map((r) => (
+                  <option key={r.deviceId} value={r.deviceId}>{r.name || r.deviceId}</option>
+                ))}
+              </select>
+            </label>
+            <div className="actions">
+              <button className="btn btn-small btn-primary" disabled={starting || waiting || !deviceId} onClick={start}>
+                {waiting ? 'Ждём палец на устройстве…' : 'Начать регистрацию'}
+              </button>
+            </div>
+          </div>
+        )}
+        {waiting && <p className="hint">Приложите палец к выбранному устройству дважды на каждый сенсор. Результат появится здесь сам.</p>}
+        {lastError && <p className="form-error">{lastError}</p>}
+      </td>
+    </tr>
+  );
+}
+
 // ---------- Журнал ----------
 function LogsTab({ call, run, notify }: { call: Call; run: Run; notify: Notify }) {
-  const { list, page, setPage, load, queryText, setQueryText } = usePagedList<LogRow>(call, notify, '/api/data');
+  const { list, page, setPage, load, queryText, setQueryText, filterQuery, setFilterQuery } = usePagedList<LogRow>(call, notify, '/api/data');
 
   const after = (p: Promise<boolean>) => void p.then((ok) => { if (ok) void load(); });
 
@@ -803,16 +981,27 @@ function LogsTab({ call, run, notify }: { call: Call; run: Run; notify: Notify }
       </section>
 
       <section className="block">
-        <label className="field search-field">
-          <span>Поиск по номеру карты, причине, «вход» или «выход»</span>
-          <input value={queryText} onChange={(e) => setQueryText(e.target.value)} placeholder="Например, DENIED_LIMIT или номер карты" />
-        </label>
+        <div className="fields">
+          <label className="field search-field">
+            <span>Поиск по номеру карты, причине, «вход» или «выход»</span>
+            <input value={queryText} onChange={(e) => setQueryText(e.target.value)} placeholder="Например, DENIED_LIMIT или номер карты" />
+          </label>
+          <label className="field">
+            <span>Тип входа</span>
+            <select value={filterQuery} onChange={(e) => setFilterQuery(e.target.value)}>
+              <option value="">Все</option>
+              <option value="credentialType=card">Карта</option>
+              <option value="credentialType=fingerprint">Отпечаток</option>
+            </select>
+          </label>
+        </div>
         <div className="table-wrap">
           <table>
             <thead>
               <tr>
                 <th scope="col">Время</th>
                 <th scope="col">Карта</th>
+                <th scope="col">Способ</th>
                 <th scope="col">Направление</th>
                 <th scope="col">Результат</th>
                 <th scope="col"><span className="visually-hidden">Действия</span></th>
@@ -823,6 +1012,7 @@ function LogsTab({ call, run, notify }: { call: Call; run: Run; notify: Notify }
                 <tr key={l._id}>
                   <td>{formatTime(l.timestamp)}</td>
                   <td>{l.user_id}</td>
+                  <td>{CREDENTIAL_TYPE_LABEL[l.credentialType] ?? l.credentialType}</td>
                   <td>{l.isEntry ? 'Вход' : 'Выход'}</td>
                   <td className="result" data-ok={l.access}>{REASON_LABEL[l.reason] ?? l.reason}</td>
                   <td className="row-actions">
