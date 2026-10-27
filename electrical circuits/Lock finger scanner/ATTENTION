@@ -1,0 +1,1 @@
+Be careful with this circuit; you can destroy the ESP32 if it's connected incorrectly. Also, these scanners require 5V on the VCC pin, but they can work at 3.3V. If you connect VCC to a 5V output, you will need a resistor.
